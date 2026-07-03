@@ -95,7 +95,7 @@ STAR='★'
 hr() {
     local char="${1:-$LINE_H}"
     printf "${GRAY}"
-    printf '%*s' 60 '' | tr ' ' "$char"
+    printf '%0.s'"$char" $(seq 1 60)
     printf "${NC}\n"
 }
 
@@ -114,11 +114,11 @@ box_header() {
     local width=58
     echo ""
     printf "  ${CYAN}${BOX_TL}"
-    printf '%*s' "$width" '' | tr ' ' "$BOX_H"
+    printf '%0.s'"$BOX_H" $(seq 1 "$width")
     printf "${NC}\n"
     printf "  ${CYAN}${BOX_V}${NC} ${BOLD}${WHITE}%s${NC}\n" "$title"
     printf "  ${CYAN}${BOX_BL}"
-    printf '%*s' "$width" '' | tr ' ' "$BOX_H"
+    printf '%0.s'"$BOX_H" $(seq 1 "$width")
     printf "${NC}\n"
 }
 
@@ -128,7 +128,9 @@ section_header() {
     local title="$2"
     echo ""
     printf "  ${BOLD}${BLUE}[%s]${NC} ${BOLD}%s${NC}\n" "$number" "$title"
-    printf "  ${GRAY}%*s${NC}\n" 56 '' | tr ' ' "$LINE_H"
+    printf "  ${GRAY}"
+    printf '%0.s'"$LINE_H" $(seq 1 56)
+    printf "${NC}\n"
 }
 
 # Function to print usage
@@ -396,9 +398,9 @@ calculate_effort() {
     local swift_loc=$(echo "$cloc_output" | awk '/^Swift/ {print $NF}')
     local scala_loc=$(echo "$cloc_output" | awk '/^Scala/ {print $NF}')
     local dart_loc=$(echo "$cloc_output" | awk '/^Dart/ {print $NF}')
-    local c_loc=$(echo "$cloc_output" | awk '/^C / {print $NF}')
+    local c_loc=$(echo "$cloc_output" | awk '/^C[[:space:]]+[0-9]/ {print $NF}')
     local cpp_loc=$(echo "$cloc_output" | awk '/^C\+\+/ {print $NF}')
-    local shell_loc=$(echo "$cloc_output" | awk '/^(Bourne |Bourne Again )?Shell/ {print $NF}')
+    local shell_loc=$(echo "$cloc_output" | awk '/^(Bourne (Again )?)?Shell/ {sum += $NF} END {print sum+0}')
     local sql_loc=$(echo "$cloc_output" | awk '/^SQL/ {print $NF}')
     local html_loc=$(echo "$cloc_output" | awk '/^HTML/ {print $NF}')
     local css_loc=$(echo "$cloc_output" | awk '/^(CSS|SASS|SCSS)/ {sum += $NF} END {print sum+0}')
@@ -725,11 +727,11 @@ calculate_effort() {
     # Final results box
     echo ""
     printf "  ${CYAN}${BOX_TL}"
-    printf '%*s' 58 '' | tr ' ' "$BOX_H"
+    printf '%0.s'"$BOX_H" $(seq 1 58)
     printf "${NC}\n"
     printf "  ${CYAN}${BOX_V}${NC} ${BOLD}${WHITE}CALCULATION BREAKDOWN${NC}\n"
     printf "  ${CYAN}${BOX_ML}"
-    printf '%*s' 58 '' | tr ' ' "$BOX_H"
+    printf '%0.s'"$BOX_H" $(seq 1 58)
     printf "${NC}\n"
 
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Base effort:${NC}       %s days ${DIM}(%s)${NC}\n" "$base_effort" "$(days_to_hm "$base_effort")"
@@ -754,7 +756,7 @@ calculate_effort() {
     fi
 
     printf "  ${CYAN}${BOX_ML}"
-    printf '%*s' 58 '' | tr ' ' "$BOX_H"
+    printf '%0.s'"$BOX_H" $(seq 1 58)
     printf "${NC}\n"
 
     printf "  ${CYAN}${BOX_V}${NC} ${BOLD}${WHITE}${STAR} FINAL ESTIMATE${NC}\n"
@@ -764,7 +766,7 @@ calculate_effort() {
     printf "  ${CYAN}${BOX_V}${NC}\n"
 
     printf "  ${CYAN}${BOX_BL}"
-    printf '%*s' 58 '' | tr ' ' "$BOX_H"
+    printf '%0.s'"$BOX_H" $(seq 1 58)
     printf "${NC}\n"
 
     # Factor summary table
