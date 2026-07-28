@@ -136,17 +136,27 @@ section_header() {
 # Function to print usage
 print_usage() {
     echo ""
-    printf "${BOLD}${CYAN}  Effort Calculator${NC} ${DIM}v2.0${NC}\n"
+    printf "${BOLD}${CYAN}  Effort Calculator${NC} ${DIM}v3.0${NC}\n"
     echo ""
     printf "  ${BOLD}USAGE:${NC}  $0 [OPTIONS] <file_or_directory> ...\n"
     echo ""
     printf "  ${BOLD}OPTIONS:${NC}\n"
     printf "    ${GREEN}-d, --detailed${NC}    Evaluate each file separately\n"
+    printf "    ${GREEN}-p, --preset${NC} ${DIM}KEY=VAL,...${NC}  Non-interactive mode with explicit factors\n"
     printf "    ${GREEN}-h, --help${NC}        Show this help message\n"
+    echo ""
+    printf "  ${BOLD}PRESET KEYS:${NC}\n"
+    printf "    ${DIM}type${NC}        Work type: enhancement, bugfix, version, refactoring\n"
+    printf "    ${DIM}complexity${NC}  Level number: 1, 2, 3\n"
+    printf "    ${DIM}familiarity${NC} Level: 1=own, 2=team, 3=inherited, 4=unknown\n"
+    printf "    ${DIM}testing${NC}     y or n\n"
+    printf "    ${DIM}doc${NC}         Level: 1=none, 2=minor, 3=standard, 4=extensive\n"
+    printf "    ${DIM}ai${NC}          Level: 1=none, 2=light, 3=moderate, 4=heavy\n"
     echo ""
     printf "  ${BOLD}EXAMPLES:${NC}\n"
     printf "    ${DIM}$0 src/${NC}\n"
     printf "    ${DIM}$0 -d src/Controller/ src/Service/${NC}\n"
+    printf "    ${DIM}$0 --preset \"type=version,complexity=2,familiarity=2,testing=y,ai=3\" src/${NC}\n"
     echo ""
     exit 1
 }
@@ -158,7 +168,7 @@ if ! command -v cloc &> /dev/null; then
 fi
 
 # Parse command line arguments
-PARSED_ARGUMENTS=$(getopt -a -n "$0" -o dh --long detailed,help -- "$@")
+PARSED_ARGUMENTS=$(getopt -a -n "$0" -o dp:h --long detailed,preset:,help -- "$@")
 VALID_ARGUMENTS=$?
 if [ "$VALID_ARGUMENTS" != "0" ]; then
     print_usage
@@ -166,12 +176,18 @@ fi
 
 eval set -- "$PARSED_ARGUMENTS"
 detailed_mode=false
+non_interactive=false
+preset_string=""
 
 while : ; do
     case "$1" in
         -d | --detailed)
             detailed_mode=true
             shift
+            ;;
+        -p | --preset)
+            preset_string="$2"
+            shift 2
             ;;
         -h | --help)
             print_usage
@@ -186,7 +202,44 @@ while : ; do
     esac
 done
 
+# Parse preset overrides into variables
+# Defaults for non-interactive mode
+PRESET_TYPE="enhancement"
+PRESET_COMPLEXITY=2
+PRESET_FAMILIARITY=1
+PRESET_TESTING="n"
+PRESET_DOC=1
+PRESET_AI=1
+
+if [ -n "$preset_string" ]; then
+    # Preset implies non-interactive
+    non_interactive=true
+
+    IFS=',' read -ra preset_pairs <<< "$preset_string"
+    for pair in "${preset_pairs[@]}"; do
+        key="${pair%%=*}"
+        val="${pair#*=}"
+        case "$key" in
+            type) PRESET_TYPE="$val" ;;
+            complexity) PRESET_COMPLEXITY="$val" ;;
+            familiarity) PRESET_FAMILIARITY="$val" ;;
+            testing) PRESET_TESTING="$val" ;;
+            doc) PRESET_DOC="$val" ;;
+            ai) PRESET_AI="$val" ;;
+            *)
+                printf "  ${RED}Unknown preset key: '%s'${NC}\n" "$key"
+                printf "  ${DIM}Valid keys: type, complexity, familiarity, testing, doc, ai${NC}\n"
+                exit 1
+                ;;
+        esac
+    done
+fi
+
 # Function to get complexity options based on type
+# Enhancement: fraction of base effort because you're adding to existing code, not rewriting all of it
+# Bugfix: typically touches a small portion of the codebase
+# Version Compatibility: scaled by how much of the codebase is affected
+# Refactoring: restructuring existing code, not writing from scratch
 get_complexity_options() {
     local work_type="$1"
     local output_type="$2"  # 'levels' or 'factors'
@@ -196,21 +249,35 @@ get_complexity_options() {
             if [ "$output_type" = "levels" ]; then
                 echo "Simple Normal Complex"
             else
-                echo "0.1 0.3 0.5"
+                # Realistic: simple change touches ~20% of logic, complex ~60%
+                echo "0.2 0.4 0.6"
+            fi
+            ;;
+        "Bugfix")
+            if [ "$output_type" = "levels" ]; then
+                echo "Trivial Moderate Deep"
+            else
+                # Bugfixes: trivial is a quick patch, deep requires full understanding
+                echo "0.1 0.25 0.5"
             fi
             ;;
         "Version Compatibility")
             if [ "$output_type" = "levels" ]; then
-                echo "Minor_Version Major_Version"
+                echo "Minor_(<30%_affected) Major_(30-60%_affected) Full_(>60%_affected)"
             else
-                echo "1.0 1.5"
+                # Version migrations are largely mechanical (API renames, deprecations)
+                # Only a fraction of "affected" code requires real cognitive effort
+                # Factor reflects that most changes are pattern-based, not creative
+                echo "0.3 0.5 0.8"
             fi
             ;;
         "Refactoring")
             if [ "$output_type" = "levels" ]; then
                 echo "Simple Normal Complex"
             else
-                echo "2.5 3.0 3.6"
+                # Refactoring reuses existing logic; never exceeds writing-from-scratch effort
+                # Replaced old 2.5/3.0/3.6 factors which were unrealistically high
+                echo "1.0 1.3 1.8"
             fi
             ;;
     esac
@@ -235,6 +302,10 @@ calculate_coupling_factor() {
             | xargs grep -cE "$import_pattern" 2>/dev/null \
             | awk -F: '{sum += $NF} END {print sum+0}')
     fi
+
+    # Sanitise: ensure dependency_count is a clean integer
+    dependency_count=$(echo "$dependency_count" | tr -d '[:space:]' | grep -oE '^[0-9]+' || echo 0)
+    dependency_count=${dependency_count:-0}
 
     # Normalise: for directories, use average per file
     if [ -d "$path" ]; then
@@ -331,10 +402,11 @@ log_effort_history() {
     local doc_level="${14}"
     local doc_effort_days="${15}"
     local coding_effort="${16}"
+    local familiarity_factor="${17}"
 
     # Create header if file doesn't exist
     if [ ! -f "$EFFORT_HISTORY_FILE" ]; then
-        echo "date,timestamp_unix,path,basename,total_weighted_loc,php,js,ts,java,kotlin,rust,go,python,csharp,ruby,swift,scala,dart,c,cpp,shell,sql,twig,jinja2,html,css,yaml,work_type,complexity_factor,coupling_factor,churn_factor,testing_factor,ai_coding_factor,ai_level,ai_overhead_days,doc_level,doc_effort_days,base_effort_days,coding_effort_days,estimated_days,estimated_hours,floored" > "$EFFORT_HISTORY_FILE"
+        echo "date,timestamp_unix,path,basename,total_weighted_loc,php,js,ts,java,kotlin,rust,go,python,csharp,ruby,swift,scala,dart,c,cpp,shell,sql,twig,jinja2,html,css,yaml,work_type,complexity_factor,familiarity_factor,coupling_factor,churn_factor,testing_factor,ai_coding_factor,ai_level,ai_overhead_days,doc_level,doc_effort_days,base_effort_days,coding_effort_days,estimated_days,estimated_hours,floored" > "$EFFORT_HISTORY_FILE"
     fi
 
     local basename_path
@@ -343,12 +415,12 @@ log_effort_history() {
     unix_ts=$(date +%s)
     local floored_flag="no"
     local raw_effort
-    raw_effort=$(awk "BEGIN {printf \"%.6f\", ($base_effort * $complexity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor) + $doc_effort_days + $ai_overhead_days}")
+    raw_effort=$(awk "BEGIN {printf \"%.6f\", ($base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor) + $doc_effort_days + $ai_overhead_days}")
     if (( $(awk "BEGIN {print ($final_effort == $MIN_EFFORT_DAYS && $raw_effort < $MIN_EFFORT_DAYS) ? 1 : 0}") )); then
         floored_flag="yes"
     fi
 
-    echo "$(date -Iseconds),$unix_ts,\"$path\",\"$basename_path\",$total_loc,$php_loc,$js_loc,$ts_loc,$java_loc,$kotlin_loc,$rust_loc,$go_loc,$python_loc,$csharp_loc,$ruby_loc,$swift_loc,$scala_loc,$dart_loc,$c_loc,$cpp_loc,$shell_loc,$sql_loc,$twig_loc,$jinja2_loc,$html_loc,$css_loc,$yaml_loc,\"$selection_type\",$complexity_factor,$coupling_factor,$churn_factor,$testing_factor,$ai_coding_factor,\"$ai_level\",$ai_overhead_days,\"$doc_level\",$doc_effort_days,$base_effort,$coding_effort,$final_effort,$total_hours,$floored_flag" >> "$EFFORT_HISTORY_FILE"
+    echo "$(date -Iseconds),$unix_ts,\"$path\",\"$basename_path\",$total_loc,$php_loc,$js_loc,$ts_loc,$java_loc,$kotlin_loc,$rust_loc,$go_loc,$python_loc,$csharp_loc,$ruby_loc,$swift_loc,$scala_loc,$dart_loc,$c_loc,$cpp_loc,$shell_loc,$sql_loc,$twig_loc,$jinja2_loc,$html_loc,$css_loc,$yaml_loc,\"$selection_type\",$complexity_factor,$familiarity_factor,$coupling_factor,$churn_factor,$testing_factor,$ai_coding_factor,\"$ai_level\",$ai_overhead_days,\"$doc_level\",$doc_effort_days,$base_effort,$coding_effort,$final_effort,$total_hours,$floored_flag" >> "$EFFORT_HISTORY_FILE"
 }
 
 # Function to calculate effort for a single file
@@ -569,66 +641,165 @@ calculate_effort() {
     local selection_type=""
     local complexity_factor=""
 
-    options=("Enhancement" "Version Compatibility" "Refactoring")
-    PS3=$'\n  Select work type (1-3): '
-    select opt in "${options[@]}"; do
-        if [[ -n "$opt" ]]; then
-            local levels=($(get_complexity_options "$opt" "levels"))
-            local factors=($(get_complexity_options "$opt" "factors"))
+    if [ "$non_interactive" = true ]; then
+        # Resolve work type from preset
+        local ni_type_name=""
+        case "$PRESET_TYPE" in
+            enhancement) ni_type_name="Enhancement" ;;
+            bugfix) ni_type_name="Bugfix" ;;
+            version) ni_type_name="Version Compatibility" ;;
+            refactoring) ni_type_name="Refactoring" ;;
+            *)
+                printf "  ${RED}Unknown preset type: '%s'${NC}\n" "$PRESET_TYPE"
+                printf "  ${DIM}Valid: enhancement, bugfix, version, refactoring${NC}\n"
+                exit 1
+                ;;
+        esac
 
-            PS3=$'\n  Select complexity level (1-'"${#levels[@]}"'): '
-            select level in "${levels[@]}"; do
-                if [[ -n "$level" ]] && ((REPLY > 0 && REPLY <= ${#levels[@]})); then
-                    local index=$((REPLY-1))
-                    selection_type="$opt - ${level//_/ }"
-                    complexity_factor="${factors[$index]}"
-                    break 2
-                else
-                    printf "  ${RED}Please select a valid option (1-${#levels[@]})${NC}\n"
-                fi
-            done
-        else
-            printf "  ${RED}Please select a valid option (1-${#options[@]})${NC}\n"
+        local ni_levels=($(get_complexity_options "$ni_type_name" "levels"))
+        local ni_factors=($(get_complexity_options "$ni_type_name" "factors"))
+        local ni_idx=$((PRESET_COMPLEXITY - 1))
+
+        # Guard against out-of-range complexity level
+        if [ "$ni_idx" -lt 0 ] || [ "$ni_idx" -ge "${#ni_levels[@]}" ]; then
+            printf "  ${RED}Complexity level %s out of range for %s (1-%d)${NC}\n" "$PRESET_COMPLEXITY" "$ni_type_name" "${#ni_levels[@]}"
+            exit 1
         fi
-    done
+
+        selection_type="$ni_type_name - ${ni_levels[$ni_idx]//_/ }"
+        complexity_factor="${ni_factors[$ni_idx]}"
+        printf "  ${DIM}(preset) %s (×%s)${NC}\n" "$selection_type" "$complexity_factor"
+    else
+        options=("Enhancement" "Bugfix" "Version Compatibility" "Refactoring")
+        PS3=$'\n  Select work type (1-4): '
+        select opt in "${options[@]}"; do
+            if [[ -n "$opt" ]]; then
+                local levels=($(get_complexity_options "$opt" "levels"))
+                local factors=($(get_complexity_options "$opt" "factors"))
+
+                PS3=$'\n  Select complexity level (1-'"${#levels[@]}"'): '
+                select level in "${levels[@]}"; do
+                    if [[ -n "$level" ]] && ((REPLY > 0 && REPLY <= ${#levels[@]})); then
+                        local index=$((REPLY-1))
+                        selection_type="$opt - ${level//_/ }"
+                        complexity_factor="${factors[$index]}"
+                        break 2
+                    else
+                        printf "  ${RED}Please select a valid option (1-${#levels[@]})${NC}\n"
+                    fi
+                done
+            else
+                printf "  ${RED}Please select a valid option (1-${#options[@]})${NC}\n"
+            fi
+        done
+    fi
 
     printf "\n  ${ARROW} Selected: ${BOLD}%s${NC} ${DIM}(×%s)${NC}\n" "$selection_type" "$complexity_factor"
+
+    # Familiarity factor — whether the developer knows this codebase
+    # One of the biggest real-world multipliers for productivity
+    section_header "4b" "Codebase Familiarity"
+    local familiarity_factor="1.00"
+
+    if [ "$non_interactive" = true ]; then
+        case "$PRESET_FAMILIARITY" in
+            1) familiarity_factor="1.00" ;;
+            2) familiarity_factor="1.15" ;;
+            3) familiarity_factor="1.40" ;;
+            4) familiarity_factor="1.70" ;;
+            *)
+                printf "  ${RED}Invalid familiarity level: %s (valid: 1-4)${NC}\n" "$PRESET_FAMILIARITY"
+                exit 1
+                ;;
+        esac
+        printf "  ${DIM}(preset) Familiarity: ×%s${NC}\n" "$familiarity_factor"
+    else
+        printf "  ${DIM}How well do you know this codebase?${NC}\n"
+        echo ""
+        local fam_options=("Own code (wrote it myself)" "Team code (familiar, reviewed it)" "Inherited (read it, know the gist)" "Unknown (never seen before)")
+        PS3=$'\n  Select familiarity level (1-4): '
+        select fam_opt in "${fam_options[@]}"; do
+            if [[ -n "$fam_opt" ]]; then
+                case $REPLY in
+                    1) familiarity_factor="1.00" ;;
+                    2) familiarity_factor="1.15" ;;  # Small overhead for context gaps
+                    3) familiarity_factor="1.40" ;;  # Significant reading/understanding time
+                    4) familiarity_factor="1.70" ;;  # Major ramp-up cost
+                esac
+                break
+            else
+                printf "  ${RED}Please select a valid option (1-4)${NC}\n"
+            fi
+        done
+    fi
+
+    if [ "$familiarity_factor" != "1.00" ]; then
+        printf "\n  ${YELLOW}${ARROW} Familiarity overhead: ×%s${NC}\n" "$familiarity_factor"
+    else
+        printf "\n  ${GREEN}${CHECK} Own code — no familiarity overhead${NC}\n"
+    fi
 
     # Testing overhead question
     section_header "5" "Testing Overhead"
     local testing_factor="1.00"
-    printf "  "
-    read -p "Does this work require creating/updating tests? (y/n): " needs_tests
-    if [[ "$needs_tests" =~ ^[Yy]$ ]]; then
-        testing_factor="1.30"
-        printf "  ${YELLOW}${ARROW} Testing overhead: ×1.30 (+30%%)${NC}\n"
+
+    if [ "$non_interactive" = true ]; then
+        if [[ "$PRESET_TESTING" =~ ^[Yy]$ ]]; then
+            testing_factor="1.30"
+            printf "  ${DIM}(preset) Testing: ×1.30${NC}\n"
+        else
+            testing_factor="1.00"
+            printf "  ${DIM}(preset) Testing: ×1.00${NC}\n"
+        fi
     else
-        printf "  ${GREEN}${CHECK} No testing overhead${NC}\n"
+        printf "  "
+        read -p "Does this work require creating/updating tests? (y/n): " needs_tests
+        if [[ "$needs_tests" =~ ^[Yy]$ ]]; then
+            testing_factor="1.30"
+            printf "  ${YELLOW}${ARROW} Testing overhead: ×1.30 (+30%%)${NC}\n"
+        else
+            printf "  ${GREEN}${CHECK} No testing overhead${NC}\n"
+        fi
     fi
 
     # Documentation overhead question
     section_header "6" "Documentation Updates"
-    printf "  ${DIM}Will this work require documentation updates?${NC}\n"
-    printf "  ${DIM}(README, API docs, architecture docs, changelogs, etc.)${NC}\n"
-    echo ""
     local doc_effort_days="0.000000"
     local doc_level="None"
 
-    local doc_options=("None" "Minor (changelog, comments)" "Standard (README, API docs)" "Extensive (architecture, guides, specs)")
-    PS3=$'\n  Select documentation level (1-4): '
-    select doc_opt in "${doc_options[@]}"; do
-        if [[ -n "$doc_opt" ]]; then
-            case $REPLY in
-                1) doc_effort_days="0.000000"; doc_level="None" ;;
-                2) doc_effort_days="0.125000"; doc_level="Minor"; ;; # 1 hour
-                3) doc_effort_days="0.375000"; doc_level="Standard"; ;; # 3 hours
-                4) doc_effort_days="0.750000"; doc_level="Extensive"; ;; # 6 hours
-            esac
-            break
-        else
-            printf "  ${RED}Please select a valid option (1-4)${NC}\n"
-        fi
-    done
+    if [ "$non_interactive" = true ]; then
+        case "$PRESET_DOC" in
+            1) doc_effort_days="0.000000"; doc_level="None" ;;
+            2) doc_effort_days="0.125000"; doc_level="Minor" ;;
+            3) doc_effort_days="0.375000"; doc_level="Standard" ;;
+            4) doc_effort_days="0.750000"; doc_level="Extensive" ;;
+            *)
+                printf "  ${RED}Invalid doc level: %s (valid: 1-4)${NC}\n" "$PRESET_DOC"
+                exit 1
+                ;;
+        esac
+        printf "  ${DIM}(preset) Documentation: %s${NC}\n" "$doc_level"
+    else
+        printf "  ${DIM}Will this work require documentation updates?${NC}\n"
+        printf "  ${DIM}(README, API docs, architecture docs, changelogs, etc.)${NC}\n"
+        echo ""
+
+        local doc_options=("None" "Minor (changelog, comments)" "Standard (README, API docs)" "Extensive (architecture, guides, specs)")
+        PS3=$'\n  Select documentation level (1-4): '
+        select doc_opt in "${doc_options[@]}"; do
+            if [[ -n "$doc_opt" ]]; then
+                case $REPLY in
+                    1) doc_effort_days="0.000000"; doc_level="None" ;;
+                    2) doc_effort_days="0.125000"; doc_level="Minor"; ;; # 1 hour
+                    3) doc_effort_days="0.375000"; doc_level="Standard"; ;; # 3 hours
+                    4) doc_effort_days="0.750000"; doc_level="Extensive"; ;; # 6 hours
+                esac
+                break
+            else
+                printf "  ${RED}Please select a valid option (1-4)${NC}\n"
+            fi
+        done
+    fi
 
     if [ "$doc_level" != "None" ]; then
         local doc_hours
@@ -642,48 +813,82 @@ calculate_effort() {
 
     # AI LLM assistance question
     section_header "7" "AI-Assisted Development (LLM)"
-    printf "  ${DIM}Will you use AI/LLM assistance (e.g., Claude Opus, GPT-4)?${NC}\n"
-    printf "  ${DIM}This reduces coding effort but adds overhead for:${NC}\n"
-    printf "  ${DIM}  - Requirements Engineering & prompt crafting${NC}\n"
-    printf "  ${DIM}  - Code review & validation of AI output${NC}\n"
-    printf "  ${DIM}  - Integration with agentic workflows${NC}\n"
-    printf "  ${DIM}  (see: github.com/cr-solutions/Requirements-Engineering-Agentic-AI)${NC}\n"
-    echo ""
     local ai_coding_factor="1.00"
     local ai_overhead_days="0.000000"
     local ai_level="None"
 
-    local ai_options=("No AI assistance" "Light (code suggestions, autocomplete)" "Moderate (feature generation, refactoring)" "Heavy (agentic AI, full workflow with RE)")
-    PS3=$'\n  Select AI assistance level (1-4): '
-    select ai_opt in "${ai_options[@]}"; do
-        if [[ -n "$ai_opt" ]]; then
-            case $REPLY in
-                1)
-                    ai_coding_factor="1.00"
-                    ai_overhead_days="0.000000"
-                    ai_level="None"
-                    ;;
-                2)
-                    ai_coding_factor="0.85"   # 15% coding reduction
-                    ai_overhead_days="0.125000" # 1h for prompt/review overhead
-                    ai_level="Light"
-                    ;;
-                3)
-                    ai_coding_factor="0.65"   # 35% coding reduction
-                    ai_overhead_days="0.250000" # 2h for prompt engineering + review
-                    ai_level="Moderate"
-                    ;;
-                4)
-                    ai_coding_factor="0.45"   # 55% coding reduction
-                    ai_overhead_days="0.500000" # 4h for RE workflow + validation + integration
-                    ai_level="Heavy (Agentic AI)"
-                    ;;
-            esac
-            break
-        else
-            printf "  ${RED}Please select a valid option (1-4)${NC}\n"
-        fi
-    done
+    if [ "$non_interactive" = true ]; then
+        case "$PRESET_AI" in
+            1)
+                ai_coding_factor="1.00"
+                ai_overhead_days="0.000000"
+                ai_level="None"
+                ;;
+            2)
+                ai_coding_factor="0.85"
+                ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.05; if (v < 0.125) v = 0.125; printf \"%.6f\", v}")
+                ai_level="Light"
+                ;;
+            3)
+                ai_coding_factor="0.65"
+                ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.10; if (v < 0.250) v = 0.250; printf \"%.6f\", v}")
+                ai_level="Moderate"
+                ;;
+            4)
+                ai_coding_factor="0.45"
+                ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.15; if (v < 0.500) v = 0.500; printf \"%.6f\", v}")
+                ai_level="Heavy (Agentic AI)"
+                ;;
+            *)
+                printf "  ${RED}Invalid AI level: %s (valid: 1-4)${NC}\n" "$PRESET_AI"
+                exit 1
+                ;;
+        esac
+        printf "  ${DIM}(preset) AI: %s (×%s, +%s days overhead)${NC}\n" "$ai_level" "$ai_coding_factor" "$ai_overhead_days"
+    else
+        printf "  ${DIM}Will you use AI/LLM assistance (e.g., Claude Opus, GPT-4)?${NC}\n"
+        printf "  ${DIM}This reduces coding effort but adds overhead for:${NC}\n"
+        printf "  ${DIM}  - Requirements Engineering & prompt crafting${NC}\n"
+        printf "  ${DIM}  - Code review & validation of AI output${NC}\n"
+        printf "  ${DIM}  - Integration with agentic workflows${NC}\n"
+        printf "  ${DIM}  (see: github.com/cr-solutions/Requirements-Engineering-Agentic-AI)${NC}\n"
+        echo ""
+
+        local ai_options=("No AI assistance" "Light (code suggestions, autocomplete)" "Moderate (feature generation, refactoring)" "Heavy (agentic AI, full workflow with RE)")
+        PS3=$'\n  Select AI assistance level (1-4): '
+        select ai_opt in "${ai_options[@]}"; do
+            if [[ -n "$ai_opt" ]]; then
+                case $REPLY in
+                    1)
+                        ai_coding_factor="1.00"
+                        ai_overhead_days="0.000000"
+                        ai_level="None"
+                        ;;
+                    2)
+                        ai_coding_factor="0.85"   # 15% coding reduction
+                        # Overhead scales with base effort: minimum 1h, grows with project size
+                        ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.05; if (v < 0.125) v = 0.125; printf \"%.6f\", v}")
+                        ai_level="Light"
+                        ;;
+                    3)
+                        ai_coding_factor="0.65"   # 35% coding reduction
+                        # Overhead scales: minimum 2h, ~10% of base for prompt engineering + review
+                        ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.10; if (v < 0.250) v = 0.250; printf \"%.6f\", v}")
+                        ai_level="Moderate"
+                        ;;
+                    4)
+                        ai_coding_factor="0.45"   # 55% coding reduction
+                        # Overhead scales: minimum 4h, ~15% of base for RE workflow + validation
+                        ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.15; if (v < 0.500) v = 0.500; printf \"%.6f\", v}")
+                        ai_level="Heavy (Agentic AI)"
+                        ;;
+                esac
+                break
+            else
+                printf "  ${RED}Please select a valid option (1-4)${NC}\n"
+            fi
+        done
+    fi
 
     if [ "$ai_level" != "None" ]; then
         local ai_oh_hours
@@ -699,9 +904,9 @@ calculate_effort() {
     fi
 
     # Calculate final effort with all factors
-    # AI factor reduces the coding effort, then fixed overheads are added on top
+    # Familiarity and complexity multiply the base, AI reduces coding portion, then fixed overheads added
     local final_effort
-    final_effort=$(awk "BEGIN {printf \"%.6f\", ($base_effort * $complexity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor) + $doc_effort_days + $ai_overhead_days}")
+    final_effort=$(awk "BEGIN {printf \"%.6f\", ($base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor) + $doc_effort_days + $ai_overhead_days}")
 
     # Apply minimum effort floor
     local floored=false
@@ -722,7 +927,7 @@ calculate_effort() {
 
     # Also calculate what coding-only effort is (for display)
     local coding_effort
-    coding_effort=$(awk "BEGIN {printf \"%.6f\", $base_effort * $complexity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor}")
+    coding_effort=$(awk "BEGIN {printf \"%.6f\", $base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor}")
 
     # Final results box
     echo ""
@@ -736,6 +941,7 @@ calculate_effort() {
 
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Base effort:${NC}       %s days ${DIM}(%s)${NC}\n" "$base_effort" "$(days_to_hm "$base_effort")"
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Complexity:${NC}        ×%s (%s)\n" "$complexity_factor" "$selection_type"
+    printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Familiarity:${NC}       ×%s\n" "$familiarity_factor"
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Coupling:${NC}          ×%s\n" "$coupling_factor"
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Churn:${NC}             ×%s\n" "$churn_factor"
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Testing:${NC}           ×%s\n" "$testing_factor"
@@ -774,6 +980,7 @@ calculate_effort() {
     printf "  ${DIM}Factor Breakdown:${NC}\n"
     printf "  ${DIM}├── Base effort:${NC}    %s days ${DIM}(%s)${NC}\n" "$base_effort" "$(days_to_hm "$base_effort")"
     printf "  ${DIM}├── × Complexity:${NC}   %s (%s)\n" "$complexity_factor" "$selection_type"
+    printf "  ${DIM}├── × Familiarity:${NC}  %s\n" "$familiarity_factor"
     printf "  ${DIM}├── × Coupling:${NC}     %s\n" "$coupling_factor"
     printf "  ${DIM}├── × Churn:${NC}        %s\n" "$churn_factor"
     printf "  ${DIM}├── × Testing:${NC}      %s\n" "$testing_factor"
@@ -793,7 +1000,8 @@ calculate_effort() {
     log_effort_history "$path" "$total_loc" "$selection_type" "$final_effort" \
         "$coupling_factor" "$churn_factor" "$testing_factor" "$complexity_factor" \
         "$base_effort" "$total_hours" "$ai_coding_factor" "$ai_level" \
-        "$ai_overhead_days" "$doc_level" "$doc_effort_days" "$coding_effort"
+        "$ai_overhead_days" "$doc_level" "$doc_effort_days" "$coding_effort" \
+        "$familiarity_factor"
 
     echo ""
     printf "  ${DIM}${CHECK} Logged to ${UNDERLINE}%s${NC}\n" "$EFFORT_HISTORY_FILE"
@@ -833,7 +1041,7 @@ fi
 # Banner
 echo ""
 printf "  ${BOLD}${CYAN}╔══════════════════════════════════════${NC}\n"
-printf "  ${BOLD}${CYAN}║  ${WHITE}${STAR} Effort Calculator v2.0 ${STAR}${NC}\n"
+printf "  ${BOLD}${CYAN}║  ${WHITE}${STAR} Effort Calculator v3.0 ${STAR}${NC}\n"
 printf "  ${BOLD}${CYAN}╚══════════════════════════════════════${NC}\n"
 printf "  ${DIM}$(date '+%Y-%m-%d %H:%M:%S')${NC}\n"
 

@@ -13,6 +13,7 @@ A bash-based tool that estimates development effort for code projects by analyzi
 | Flag | Description |
 |------|-------------|
 | `-d`, `--detailed` | Evaluate each file separately instead of aggregating |
+| `-p`, `--preset` `KEY=VAL,...` | Non-interactive mode with explicit factors |
 | `-h`, `--help` | Show help message |
 
 ### Examples
@@ -26,6 +27,12 @@ A bash-based tool that estimates development effort for code projects by analyzi
 
 # Detailed mode: per-file breakdown
 ./code_effort_calculator.bash -d src/Controller/
+
+# Non-interactive with preset factors
+./code_effort_calculator.bash -p "type=version,complexity=2,familiarity=2,testing=y,ai=3" src/
+
+# Only override what you need — rest stays at defaults
+./code_effort_calculator.bash -p "type=bugfix,complexity=1" src/
 ```
 
 ## How It Works
@@ -35,7 +42,7 @@ A bash-based tool that estimates development effort for code projects by analyzi
 ```
 final_effort = coding_effort + documentation_overhead + ai_overhead
 
-coding_effort = base_effort × complexity × coupling × churn × testing × ai_reduction
+coding_effort = base_effort × complexity × familiarity × coupling × churn × testing × ai_reduction
 base_effort   = Σ (LOC_per_language ÷ rate_per_language)
 ```
 
@@ -84,24 +91,51 @@ This reflects that template changes are typically simpler than logic changes.
 
 ---
 
-### 2. Complexity Factor
+### 2. Complexity Factor (Work Type)
 
 An interactive selection that classifies the type and difficulty of work:
 
-| Work Type | Level | Factor | Meaning |
-|-----------|-------|--------|---------|
-| **Enhancement** | Simple | ×0.1 | Trivial change, single function |
-| | Normal | ×0.3 | Multi-file change, some logic |
-| | Complex | ×0.5 | Architectural impact, many touch-points |
-| **Version Compatibility** | Minor Version | ×1.0 | API compatible, incremental updates |
-| | Major Version | ×1.5 | Breaking changes, migration work |
-| **Refactoring** | Simple | ×2.5 | Rename, extract method |
-| | Normal | ×3.0 | Restructure module, change patterns |
-| | Complex | ×3.6 | Architecture overhaul, full rewrite |
+| Work Type | Level | # | Factor | Meaning |
+|-----------|-------|---|--------|---------|
+| **Enhancement** | Simple | 1 | ×0.2 | Small addition, single function or endpoint |
+| | Normal | 2 | ×0.4 | Multi-file change, moderate logic |
+| | Complex | 3 | ×0.6 | Architectural impact, many touch-points |
+| **Bugfix** | Trivial | 1 | ×0.1 | Quick patch, obvious root cause |
+| | Moderate | 2 | ×0.25 | Requires investigation, touches multiple files |
+| | Deep | 3 | ×0.5 | Root cause hunting, systemic issue |
+| **Version Compatibility** | Minor (<30% affected) | 1 | ×0.3 | Few API changes, mostly compatible |
+| | Major (30-60% affected) | 2 | ×0.5 | Significant migration, pattern-based changes |
+| | Full (>60% affected) | 3 | ×0.8 | Near-complete adaptation required |
+| **Refactoring** | Simple | 1 | ×1.0 | Rename, extract method, move class |
+| | Normal | 2 | ×1.3 | Restructure module, change patterns |
+| | Complex | 3 | ×1.8 | Architecture overhaul, deep redesign |
+
+The `#` column corresponds to the `complexity` value used in `--preset`.
+
+#### Design Rationale
+
+- **Enhancement/Bugfix factors are < 1.0** because you're modifying existing code, not writing all of it from scratch. A "Normal Enhancement" touches roughly 40% of the cognitive load that writing it fresh would require.
+- **Version Compatibility factors reflect that migrations are largely mechanical** — API renames, deprecation replacements, namespace shifts. Even "Major" (30-60% affected) uses ×0.5 because most changes are pattern-based rather than creative.
+- **Refactoring factors are ≥ 1.0** because restructuring requires understanding the existing design *and* creating a new one. Complex refactoring (×1.8) is significant but never exceeds writing-from-scratch effort (which would be the base effort itself).
 
 ---
 
-### 3. Coupling Factor
+### 3. Codebase Familiarity
+
+**What it measures**: How well the developer knows the code being modified. One of the biggest real-world productivity multipliers.
+
+| Level | Factor | Interpretation |
+|-------|--------|----------------|
+| Own code (wrote it myself) | ×1.00 | Full context, no ramp-up needed |
+| Team code (familiar, reviewed it) | ×1.15 | Small overhead for context gaps |
+| Inherited (read it, know the gist) | ×1.40 | Significant reading/understanding time |
+| Unknown (never seen before) | ×1.70 | Major ramp-up cost, documentation diving |
+
+**Why it matters**: A developer modifying their own code operates at full speed. The same task on a completely unknown codebase takes 70% longer due to understanding the architecture, conventions, implicit assumptions, and undocumented behaviour.
+
+---
+
+### 4. Coupling Factor
 
 **What it measures**: How interconnected the code is with other modules. Highly coupled code is riskier to modify because changes cascade.
 
@@ -117,7 +151,7 @@ An interactive selection that classifies the type and difficulty of work:
 
 ---
 
-### 4. Churn Factor
+### 5. Churn Factor
 
 **What it measures**: How frequently the code has been modified historically, based on git commit count.
 
@@ -135,7 +169,7 @@ An interactive selection that classifies the type and difficulty of work:
 
 ---
 
-### 5. Testing Overhead
+### 6. Testing Overhead
 
 **What it measures**: Additional effort required for creating or updating automated tests.
 
@@ -148,7 +182,7 @@ An interactive selection that classifies the type and difficulty of work:
 
 ---
 
-### 6. Documentation Overhead
+### 7. Documentation Overhead
 
 **What it measures**: Fixed time required for documentation updates, added as a flat amount on top of coding effort.
 
@@ -163,19 +197,23 @@ An interactive selection that classifies the type and difficulty of work:
 
 ---
 
-### 7. AI-Assisted Development (LLM)
+### 8. AI-Assisted Development (LLM)
 
 **What it measures**: The impact of using AI tools (like Claude Opus, GPT-4, GitHub Copilot) on development effort. This has two components:
 
 1. **Coding reduction** — a multiplier that reduces the coding effort
-2. **AI overhead** — fixed time added for prompt engineering, review, and validation
+2. **AI overhead** — time added for prompt engineering, review, and validation (scales with project size)
 
 | Level | Coding Factor | Overhead | Net Impact |
 |-------|--------------|----------|------------|
 | No AI | ×1.00 | +0h | Full manual effort |
-| Light | ×0.85 (−15%) | +1h | Autocomplete, suggestions |
-| Moderate | ×0.65 (−35%) | +2h | Feature generation, refactoring |
-| Heavy (Agentic) | ×0.45 (−55%) | +4h | Full RE workflow, agentic AI |
+| Light | ×0.85 (−15%) | min 1h, or 5% of base | Autocomplete, suggestions |
+| Moderate | ×0.65 (−35%) | min 2h, or 10% of base | Feature generation, refactoring |
+| Heavy (Agentic) | ×0.45 (−55%) | min 4h, or 15% of base | Full RE workflow, agentic AI |
+
+#### Scaling AI Overhead
+
+Unlike v2.0 (which used fixed overhead), the AI overhead now scales with project size. For a 1-day base effort, the minimum floors apply (1h/2h/4h). For a 10-day base effort, overhead grows proportionally (4h/8h/12h) because larger projects require more prompt iteration, review cycles, and integration work.
 
 #### What the AI overhead covers:
 
@@ -191,7 +229,7 @@ The "Heavy" level assumes use of structured Requirements Engineering workflows s
 
 ---
 
-### 8. Minimum Effort Floor
+### 9. Minimum Effort Floor
 
 Any estimate below **0.25 days (2 hours)** is automatically raised to the floor. This accounts for irreducible overhead:
 
@@ -204,6 +242,23 @@ Even a one-line fix requires these steps.
 
 ---
 
+## Presets (Non-Interactive Mode)
+
+The `-p` / `--preset` flag runs the tool without prompts, using the factors you specify. Unspecified keys use sensible defaults.
+
+### Preset Keys
+
+| Key | Values | Default |
+|-----|--------|---------|
+| `type` | `enhancement`, `bugfix`, `version`, `refactoring` | `enhancement` |
+| `complexity` | `1`, `2`, `3` (maps to the levels per work type) | `2` |
+| `familiarity` | `1`=own, `2`=team, `3`=inherited, `4`=unknown | `1` |
+| `testing` | `y` or `n` | `n` |
+| `doc` | `1`=none, `2`=minor, `3`=standard, `4`=extensive | `1` |
+| `ai` | `1`=none, `2`=light, `3`=moderate, `4`=heavy | `1` |
+
+---
+
 ## Output
 
 ### Terminal Display
@@ -212,7 +267,7 @@ The tool provides a colored, structured output with:
 - Per-language LOC table with rates
 - Base effort breakdown per language (days + hours/minutes)
 - Automated analysis results (coupling, churn)
-- Interactive selections (work type, tests, docs, AI)
+- Interactive selections (work type, familiarity, tests, docs, AI)
 - Final calculation box with full factor breakdown
 - Tree-style summary
 
@@ -230,6 +285,7 @@ Every estimate is logged to `~/.effort_history.csv` for historical calibration. 
 | `php` through `yaml` | Per-language raw LOC (22 columns) |
 | `work_type` | Selected complexity type |
 | `complexity_factor` | Work type multiplier |
+| `familiarity_factor` | Codebase familiarity multiplier |
 | `coupling_factor` | Dependency coupling |
 | `churn_factor` | Git history factor |
 | `testing_factor` | Testing overhead |
