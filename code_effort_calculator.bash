@@ -1017,9 +1017,20 @@ process_path() {
         return 1
     fi
 
+    # Resolve git branch from the target path's repository
+    local git_dir
+    if [ -d "$path" ]; then
+        git_dir="$path"
+    else
+        git_dir=$(dirname "$path")
+    fi
+    local target_branch
+    target_branch=$(git -C "$git_dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
+
     if [ "$detailed_mode" = true ]; then
         if [ -d "$path" ]; then
             box_header "Directory: $path_name"
+            [ -n "$target_branch" ] && printf "  ${DIM}Branch:${NC} ${CYAN}%s${NC}\n" "$target_branch"
             while IFS= read -r -d '' file; do
                 calculate_single_file "$file"
             done < <(eval find "$path" -type f $FILE_EXTENSIONS -print0)
@@ -1028,6 +1039,7 @@ process_path() {
         fi
     else
         box_header "$path_name"
+        [ -n "$target_branch" ] && printf "  ${DIM}Branch:${NC} ${CYAN}%s${NC}\n" "$target_branch"
         calculate_effort "$path"
         echo ""
     fi
