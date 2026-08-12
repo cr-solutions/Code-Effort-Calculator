@@ -54,6 +54,10 @@ HTML_RATE=1000       # Markup, very declarative
 CSS_RATE=900         # Styling, mostly declarative
 YAML_RATE=900        # Config, declarative
 
+# Directories to exclude from analysis (vendor/dependency directories)
+# These are third-party code that should not count towards effort estimation
+EXCLUDE_DIRS=(vendor node_modules .vendor dist build .git __pycache__ .venv venv)
+
 # Minimum effort floor in days (0.25 = 2 hours)
 MIN_EFFORT_DAYS=0.25
 
@@ -286,6 +290,14 @@ get_complexity_options() {
 # Supported file extensions for find commands
 FILE_EXTENSIONS='\( -name "*.php" -o -name "*.js" -o -name "*.ts" -o -name "*.twig" -o -name "*.j2" -o -name "*.jinja2" -o -name "*.java" -o -name "*.kt" -o -name "*.rs" -o -name "*.go" -o -name "*.py" -o -name "*.cs" -o -name "*.rb" -o -name "*.swift" -o -name "*.scala" -o -name "*.dart" -o -name "*.c" -o -name "*.h" -o -name "*.cpp" -o -name "*.cc" -o -name "*.hpp" -o -name "*.sh" -o -name "*.bash" -o -name "*.sql" -o -name "*.html" -o -name "*.css" -o -name "*.scss" -o -name "*.yaml" -o -name "*.yml" \)'
 
+# Build cloc exclude flags and find prune expressions from EXCLUDE_DIRS
+CLOC_EXCLUDE_FLAGS=""
+FIND_PRUNE_EXPR=""
+for _dir in "${EXCLUDE_DIRS[@]}"; do
+    CLOC_EXCLUDE_FLAGS="${CLOC_EXCLUDE_FLAGS} --exclude-dir=${_dir}"
+    FIND_PRUNE_EXPR="${FIND_PRUNE_EXPR} -not -path '*/${_dir}/*'"
+done
+
 # Function to calculate dependency coupling factor
 # Counts use/require/import statements to gauge coupling
 calculate_coupling_factor() {
@@ -297,7 +309,7 @@ calculate_coupling_factor() {
     if [ -f "$path" ]; then
         dependency_count=$(grep -cE "$import_pattern" "$path" 2>/dev/null || echo 0)
     elif [ -d "$path" ]; then
-        dependency_count=$(eval find "$path" -type f $FILE_EXTENSIONS \
+        dependency_count=$(eval find "$path" -type f $FIND_PRUNE_EXPR $FILE_EXTENSIONS \
             -exec grep -lE "$import_pattern" {} \; 2>/dev/null \
             | xargs grep -cE "$import_pattern" 2>/dev/null \
             | awk -F: '{sum += $NF} END {print sum+0}')
@@ -310,7 +322,7 @@ calculate_coupling_factor() {
     # Normalise: for directories, use average per file
     if [ -d "$path" ]; then
         local file_count
-        file_count=$(eval find "$path" -type f $FILE_EXTENSIONS | wc -l)
+        file_count=$(eval find "$path" -type f $FIND_PRUNE_EXPR $FILE_EXTENSIONS | wc -l)
         if [ "$file_count" -gt 0 ]; then
             dependency_count=$(echo "scale=0; $dependency_count / $file_count" | bc)
         fi
@@ -348,7 +360,7 @@ calculate_churn_factor() {
             fc=$(git log --oneline -- "$file" 2>/dev/null | wc -l)
             total_commits=$((total_commits + fc))
             ((file_count++))
-        done < <(eval find "$path" -type f $FILE_EXTENSIONS -print0)
+        done < <(eval find "$path" -type f $FIND_PRUNE_EXPR $FILE_EXTENSIONS -print0)
         if [ "$file_count" -gt 0 ]; then
             commit_count=$((total_commits / file_count))
         fi
@@ -439,9 +451,9 @@ calculate_effort() {
     # Run cloc and store the output
     local cloc_output
     if [ -f "$path" ]; then
-        cloc_output=$(/usr/bin/cloc "$path" 2>/dev/null)
+        cloc_output=$(/usr/bin/cloc $CLOC_EXCLUDE_FLAGS "$path" 2>/dev/null)
     elif [ -d "$path" ]; then
-        cloc_output=$(/usr/bin/cloc "$path" 2>/dev/null)
+        cloc_output=$(/usr/bin/cloc $CLOC_EXCLUDE_FLAGS "$path" 2>/dev/null)
     else
         echo "Error: '$path' is neither a valid file nor directory"
         exit 1
@@ -1033,7 +1045,7 @@ process_path() {
             [ -n "$target_branch" ] && printf "  ${DIM}Branch:${NC} ${CYAN}%s${NC}\n" "$target_branch"
             while IFS= read -r -d '' file; do
                 calculate_single_file "$file"
-            done < <(eval find "$path" -type f $FILE_EXTENSIONS -print0)
+            done < <(eval find "$path" -type f $FIND_PRUNE_EXPR $FILE_EXTENSIONS -print0)
         else
             calculate_single_file "$path"
         fi

@@ -118,6 +118,8 @@ The `#` column corresponds to the `complexity` value used in `--preset`.
 - **Version Compatibility factors reflect that migrations are largely mechanical** — API renames, deprecation replacements, namespace shifts. Even "Major" (30-60% affected) uses ×0.5 because most changes are pattern-based rather than creative.
 - **Refactoring factors are ≥ 1.0** because restructuring requires understanding the existing design *and* creating a new one. Complex refactoring (×1.8) is significant but never exceeds writing-from-scratch effort (which would be the base effort itself).
 
+> **Tip — Breaking API migrations**: For framework upgrades that constitute a complete API overhaul (e.g. Vue 2→3, Angular.js→Angular, Python 2→3), consider using `type=refactoring,complexity=2` (×1.3) instead of `type=version,complexity=3` (×0.8). Version Compatibility assumes largely mechanical, pattern-based changes. When the migration requires learning a fundamentally new paradigm (Composition API, new reactivity model, removed core features), the refactoring type better reflects the cognitive load involved.
+
 ---
 
 ### 3. Codebase Familiarity
@@ -322,6 +324,21 @@ PYTHON_RATE=700
 # Example: Raise the minimum floor to 4 hours
 MIN_EFFORT_DAYS=0.50
 ```
+
+### Excluded Directories
+
+The tool automatically excludes common dependency/build directories from analysis. These directories contain third-party code that would skew your effort estimation:
+
+```bash
+EXCLUDE_DIRS=(vendor node_modules .vendor dist build .git __pycache__ .venv venv)
+```
+
+This applies to all three analysis stages:
+- **LOC counting** (`cloc --exclude-dir`)
+- **Coupling analysis** (`find` with path exclusions)
+- **Churn analysis** (`find` with path exclusions)
+
+Add or remove entries as needed for your stack.
 
 ## License
 
