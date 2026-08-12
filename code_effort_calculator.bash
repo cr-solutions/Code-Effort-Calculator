@@ -291,10 +291,10 @@ get_complexity_options() {
 FILE_EXTENSIONS='\( -name "*.php" -o -name "*.js" -o -name "*.ts" -o -name "*.twig" -o -name "*.j2" -o -name "*.jinja2" -o -name "*.java" -o -name "*.kt" -o -name "*.rs" -o -name "*.go" -o -name "*.py" -o -name "*.cs" -o -name "*.rb" -o -name "*.swift" -o -name "*.scala" -o -name "*.dart" -o -name "*.c" -o -name "*.h" -o -name "*.cpp" -o -name "*.cc" -o -name "*.hpp" -o -name "*.sh" -o -name "*.bash" -o -name "*.sql" -o -name "*.html" -o -name "*.css" -o -name "*.scss" -o -name "*.yaml" -o -name "*.yml" \)'
 
 # Build cloc exclude flags and find prune expressions from EXCLUDE_DIRS
-CLOC_EXCLUDE_FLAGS=""
+# cloc supports comma-separated list for --exclude-dir (matches at any depth)
+CLOC_EXCLUDE_FLAGS="--exclude-dir=$(IFS=,; echo "${EXCLUDE_DIRS[*]}")"
 FIND_PRUNE_EXPR=""
 for _dir in "${EXCLUDE_DIRS[@]}"; do
-    CLOC_EXCLUDE_FLAGS="${CLOC_EXCLUDE_FLAGS} --exclude-dir=${_dir}"
     FIND_PRUNE_EXPR="${FIND_PRUNE_EXPR} -not -path '*/${_dir}/*'"
 done
 
