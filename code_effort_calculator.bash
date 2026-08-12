@@ -153,14 +153,15 @@ print_usage() {
     printf "    ${DIM}type${NC}        Work type: enhancement, bugfix, version, refactoring\n"
     printf "    ${DIM}complexity${NC}  Level number: 1, 2, 3\n"
     printf "    ${DIM}familiarity${NC} Level: 1=own, 2=team, 3=inherited, 4=unknown\n"
-    printf "    ${DIM}testing${NC}     y or n\n"
+    printf "    ${DIM}unittest${NC}    y or n (automated unit/integration tests)\n"
+    printf "    ${DIM}functest${NC}    Level: 0=none, 1=basic, 2=standard, 3=complex\n"
     printf "    ${DIM}doc${NC}         Level: 1=none, 2=minor, 3=standard, 4=extensive\n"
     printf "    ${DIM}ai${NC}          Level: 1=none, 2=light, 3=moderate, 4=heavy\n"
     echo ""
     printf "  ${BOLD}EXAMPLES:${NC}\n"
     printf "    ${DIM}$0 src/${NC}\n"
     printf "    ${DIM}$0 -d src/Controller/ src/Service/${NC}\n"
-    printf "    ${DIM}$0 --preset \"type=version,complexity=2,familiarity=2,testing=y,ai=3\" src/${NC}\n"
+    printf "    ${DIM}$0 --preset \"type=version,complexity=2,familiarity=2,unittest=y,ai=3\" src/${NC}\n"
     echo ""
     exit 1
 }
@@ -211,7 +212,8 @@ done
 PRESET_TYPE="enhancement"
 PRESET_COMPLEXITY=2
 PRESET_FAMILIARITY=1
-PRESET_TESTING="n"
+PRESET_UNITTEST="n"
+PRESET_FUNCTEST=0
 PRESET_DOC=1
 PRESET_AI=1
 
@@ -227,12 +229,14 @@ if [ -n "$preset_string" ]; then
             type) PRESET_TYPE="$val" ;;
             complexity) PRESET_COMPLEXITY="$val" ;;
             familiarity) PRESET_FAMILIARITY="$val" ;;
-            testing) PRESET_TESTING="$val" ;;
+            unittest) PRESET_UNITTEST="$val" ;;
+            testing) PRESET_UNITTEST="$val" ;;  # backward compatibility
+            functest) PRESET_FUNCTEST="$val" ;;
             doc) PRESET_DOC="$val" ;;
             ai) PRESET_AI="$val" ;;
             *)
                 printf "  ${RED}Unknown preset key: '%s'${NC}\n" "$key"
-                printf "  ${DIM}Valid keys: type, complexity, familiarity, testing, doc, ai${NC}\n"
+                printf "  ${DIM}Valid keys: type, complexity, familiarity, unittest, functest, doc, ai${NC}\n"
                 exit 1
                 ;;
         esac
@@ -415,10 +419,12 @@ log_effort_history() {
     local doc_effort_days="${15}"
     local coding_effort="${16}"
     local familiarity_factor="${17}"
+    local functest_level="${18}"
+    local functest_effort_days="${19}"
 
     # Create header if file doesn't exist
     if [ ! -f "$EFFORT_HISTORY_FILE" ]; then
-        echo "date,timestamp_unix,path,basename,total_weighted_loc,php,js,ts,java,kotlin,rust,go,python,csharp,ruby,swift,scala,dart,c,cpp,shell,sql,twig,jinja2,html,css,yaml,work_type,complexity_factor,familiarity_factor,coupling_factor,churn_factor,testing_factor,ai_coding_factor,ai_level,ai_overhead_days,doc_level,doc_effort_days,base_effort_days,coding_effort_days,estimated_days,estimated_hours,floored" > "$EFFORT_HISTORY_FILE"
+        echo "date,timestamp_unix,path,basename,total_weighted_loc,php,js,ts,java,kotlin,rust,go,python,csharp,ruby,swift,scala,dart,c,cpp,shell,sql,twig,jinja2,html,css,yaml,work_type,complexity_factor,familiarity_factor,coupling_factor,churn_factor,testing_factor,functest_level,functest_effort_days,ai_coding_factor,ai_level,ai_overhead_days,doc_level,doc_effort_days,base_effort_days,coding_effort_days,estimated_days,estimated_hours,floored" > "$EFFORT_HISTORY_FILE"
     fi
 
     local basename_path
@@ -427,12 +433,12 @@ log_effort_history() {
     unix_ts=$(date +%s)
     local floored_flag="no"
     local raw_effort
-    raw_effort=$(awk "BEGIN {printf \"%.6f\", ($base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor) + $doc_effort_days + $ai_overhead_days}")
+    raw_effort=$(awk "BEGIN {printf \"%.6f\", ($base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor) + $doc_effort_days + $ai_overhead_days + $functest_effort_days}")
     if (( $(awk "BEGIN {print ($final_effort == $MIN_EFFORT_DAYS && $raw_effort < $MIN_EFFORT_DAYS) ? 1 : 0}") )); then
         floored_flag="yes"
     fi
 
-    echo "$(date -Iseconds),$unix_ts,\"$path\",\"$basename_path\",$total_loc,$php_loc,$js_loc,$ts_loc,$java_loc,$kotlin_loc,$rust_loc,$go_loc,$python_loc,$csharp_loc,$ruby_loc,$swift_loc,$scala_loc,$dart_loc,$c_loc,$cpp_loc,$shell_loc,$sql_loc,$twig_loc,$jinja2_loc,$html_loc,$css_loc,$yaml_loc,\"$selection_type\",$complexity_factor,$familiarity_factor,$coupling_factor,$churn_factor,$testing_factor,$ai_coding_factor,\"$ai_level\",$ai_overhead_days,\"$doc_level\",$doc_effort_days,$base_effort,$coding_effort,$final_effort,$total_hours,$floored_flag" >> "$EFFORT_HISTORY_FILE"
+    echo "$(date -Iseconds),$unix_ts,\"$path\",\"$basename_path\",$total_loc,$php_loc,$js_loc,$ts_loc,$java_loc,$kotlin_loc,$rust_loc,$go_loc,$python_loc,$csharp_loc,$ruby_loc,$swift_loc,$scala_loc,$dart_loc,$c_loc,$cpp_loc,$shell_loc,$sql_loc,$twig_loc,$jinja2_loc,$html_loc,$css_loc,$yaml_loc,\"$selection_type\",$complexity_factor,$familiarity_factor,$coupling_factor,$churn_factor,$testing_factor,\"$functest_level\",$functest_effort_days,$ai_coding_factor,\"$ai_level\",$ai_overhead_days,\"$doc_level\",$doc_effort_days,$base_effort,$coding_effort,$final_effort,$total_hours,$floored_flag" >> "$EFFORT_HISTORY_FILE"
 }
 
 # Function to calculate effort for a single file
@@ -751,27 +757,113 @@ calculate_effort() {
         printf "\n  ${GREEN}${CHECK} Own code — no familiarity overhead${NC}\n"
     fi
 
-    # Testing overhead question
-    section_header "5" "Testing Overhead"
+    # Unit/Integration testing overhead question
+    section_header "5" "Unit/Integration Testing"
     local testing_factor="1.00"
 
     if [ "$non_interactive" = true ]; then
-        if [[ "$PRESET_TESTING" =~ ^[Yy]$ ]]; then
+        if [[ "$PRESET_UNITTEST" =~ ^[Yy]$ ]]; then
             testing_factor="1.30"
-            printf "  ${DIM}(preset) Testing: ×1.30${NC}\n"
+            printf "  ${DIM}(preset) Unit testing: ×1.30${NC}\n"
         else
             testing_factor="1.00"
-            printf "  ${DIM}(preset) Testing: ×1.00${NC}\n"
+            printf "  ${DIM}(preset) Unit testing: ×1.00${NC}\n"
         fi
     else
+        printf "  ${DIM}Does this work require creating/updating automated tests?${NC}\n"
+        printf "  ${DIM}(unit tests, integration tests, e2e test suites)${NC}\n"
         printf "  "
-        read -p "Does this work require creating/updating tests? (y/n): " needs_tests
+        read -p "Automated tests required? (y/n): " needs_tests
         if [[ "$needs_tests" =~ ^[Yy]$ ]]; then
             testing_factor="1.30"
-            printf "  ${YELLOW}${ARROW} Testing overhead: ×1.30 (+30%%)${NC}\n"
+            printf "  ${YELLOW}${ARROW} Unit/integration testing: ×1.30 (+30%%)${NC}\n"
         else
-            printf "  ${GREEN}${CHECK} No testing overhead${NC}\n"
+            printf "  ${GREEN}${CHECK} No automated testing overhead${NC}\n"
         fi
+    fi
+
+    # Functional/Manual testing overhead question
+    # Formula: functest_effort = (coding_effort × factor) + fixed_buffer
+    # Based on real-world plugin testing experience:
+    # - Backend-only: 0.3x + 1h buffer
+    # - Standard (mixed): 0.35x + 1.5h buffer
+    # - Complex (UI + APIs + multi-env): 0.5x + 2h buffer
+    section_header "5b" "Functional Testing (Manual/QA)"
+    local functest_factor="0.00"
+    local functest_buffer_days="0.000000"
+    local functest_level="None"
+
+    if [ "$non_interactive" = true ]; then
+        case "$PRESET_FUNCTEST" in
+            0)
+                functest_factor="0.00"
+                functest_buffer_days="0.000000"
+                functest_level="None"
+                ;;
+            1)
+                functest_factor="0.30"
+                functest_buffer_days="0.125000"  # 1h setup/testdata
+                functest_level="Basic"
+                ;;
+            2)
+                functest_factor="0.35"
+                functest_buffer_days="0.187500"  # 1.5h setup/doku
+                functest_level="Standard"
+                ;;
+            3)
+                functest_factor="0.50"
+                functest_buffer_days="0.250000"  # 2h sandbox/multi-browser/responsive
+                functest_level="Complex"
+                ;;
+            *)
+                printf "  ${RED}Invalid functest level: %s (valid: 0-3)${NC}\n" "$PRESET_FUNCTEST"
+                exit 1
+                ;;
+        esac
+        printf "  ${DIM}(preset) Functional testing: %s${NC}\n" "$functest_level"
+    else
+        printf "  ${DIM}Does this work require manual functional testing / QA?${NC}\n"
+        printf "  ${DIM}(Happy path, edge cases, permissions, error handling, cleanup)${NC}\n"
+        echo ""
+
+        local functest_options=("None (no manual testing)" "Basic (backend-only, internal logic, happy path)" "Standard (mixed frontend/backend, API calls)" "Complex (UI + third-party APIs, multi-browser, multi-env)")
+        PS3=$'\n  Select functional testing level (1-4): '
+        select ft_opt in "${functest_options[@]}"; do
+            if [[ -n "$ft_opt" ]]; then
+                case $REPLY in
+                    1)
+                        functest_factor="0.00"
+                        functest_buffer_days="0.000000"
+                        functest_level="None"
+                        ;;
+                    2)
+                        functest_factor="0.30"
+                        functest_buffer_days="0.125000"  # 1h
+                        functest_level="Basic"
+                        ;;
+                    3)
+                        functest_factor="0.35"
+                        functest_buffer_days="0.187500"  # 1.5h
+                        functest_level="Standard"
+                        ;;
+                    4)
+                        functest_factor="0.50"
+                        functest_buffer_days="0.250000"  # 2h
+                        functest_level="Complex"
+                        ;;
+                esac
+                break
+            else
+                printf "  ${RED}Please select a valid option (1-4)${NC}\n"
+            fi
+        done
+    fi
+
+    if [ "$functest_level" != "None" ]; then
+        printf "\n  ${YELLOW}${ARROW} Functional testing: coding_effort × %s + %s days buffer (%s)${NC}\n" \
+            "$functest_factor" "$functest_buffer_days" "$functest_level"
+    else
+        printf "\n  ${GREEN}${CHECK} No functional testing overhead${NC}\n"
     fi
 
     # Documentation overhead question
@@ -917,8 +1009,20 @@ calculate_effort() {
 
     # Calculate final effort with all factors
     # Familiarity and complexity multiply the base, AI reduces coding portion, then fixed overheads added
+    # Functional testing is additive: (coding_effort × functest_factor) + buffer
     local final_effort
-    final_effort=$(awk "BEGIN {printf \"%.6f\", ($base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor) + $doc_effort_days + $ai_overhead_days}")
+    local functest_effort_days="0.000000"
+
+    # Calculate coding effort first (needed for functest calculation)
+    local coding_effort
+    coding_effort=$(awk "BEGIN {printf \"%.6f\", $base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor}")
+
+    # Calculate functional testing effort based on coding effort
+    if [ "$functest_level" != "None" ]; then
+        functest_effort_days=$(awk "BEGIN {printf \"%.6f\", ($coding_effort * $functest_factor) + $functest_buffer_days}")
+    fi
+
+    final_effort=$(awk "BEGIN {printf \"%.6f\", $coding_effort + $doc_effort_days + $ai_overhead_days + $functest_effort_days}")
 
     # Apply minimum effort floor
     local floored=false
@@ -937,9 +1041,7 @@ calculate_effort() {
     local minutes
     minutes=$(awk "BEGIN {printf \"%d\", ($total_hours - int($total_hours)) * 60}")
 
-    # Also calculate what coding-only effort is (for display)
-    local coding_effort
-    coding_effort=$(awk "BEGIN {printf \"%.6f\", $base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor}")
+    # coding_effort already calculated above (before functest)
 
     # Final results box
     echo ""
@@ -962,6 +1064,9 @@ calculate_effort() {
     fi
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}─────────────────────────────${NC}\n"
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Coding effort:${NC}     %s days ${DIM}(%s)${NC}\n" "$coding_effort" "$(days_to_hm "$coding_effort")"
+    if [ "$functest_level" != "None" ]; then
+        printf "  ${CYAN}${BOX_V}${NC}  ${DIM}+ Func. testing:${NC}   +%s days ${DIM}(%s — %s)${NC}\n" "$functest_effort_days" "$(days_to_hm "$functest_effort_days")" "$functest_level"
+    fi
     if [ "$doc_level" != "None" ]; then
         printf "  ${CYAN}${BOX_V}${NC}  ${DIM}+ Documentation:${NC}   +%s days ${DIM}(%s — %s)${NC}\n" "$doc_effort_days" "$(days_to_hm "$doc_effort_days")" "$doc_level"
     fi
@@ -1000,6 +1105,9 @@ calculate_effort() {
         printf "  ${DIM}├── × AI reduction:${NC} %s (%s)\n" "$ai_coding_factor" "$ai_level"
     fi
     printf "  ${DIM}├── = Coding:${NC}       %s days ${DIM}(%s)${NC}\n" "$coding_effort" "$(days_to_hm "$coding_effort")"
+    if [ "$functest_level" != "None" ]; then
+        printf "  ${DIM}├── + Func. testing:${NC} %s days ${DIM}(%s — %s)${NC}\n" "$functest_effort_days" "$(days_to_hm "$functest_effort_days")" "$functest_level"
+    fi
     if [ "$doc_level" != "None" ]; then
         printf "  ${DIM}├── + Documentation:${NC} %s days ${DIM}(%s — %s)${NC}\n" "$doc_effort_days" "$(days_to_hm "$doc_effort_days")" "$doc_level"
     fi
@@ -1013,7 +1121,7 @@ calculate_effort() {
         "$coupling_factor" "$churn_factor" "$testing_factor" "$complexity_factor" \
         "$base_effort" "$total_hours" "$ai_coding_factor" "$ai_level" \
         "$ai_overhead_days" "$doc_level" "$doc_effort_days" "$coding_effort" \
-        "$familiarity_factor"
+        "$familiarity_factor" "$functest_level" "$functest_effort_days"
 
     echo ""
     printf "  ${DIM}${CHECK} Logged to ${UNDERLINE}%s${NC}\n" "$EFFORT_HISTORY_FILE"

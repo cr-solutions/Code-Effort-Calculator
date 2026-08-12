@@ -29,7 +29,7 @@ A bash-based tool that estimates development effort for code projects by analyzi
 ./code_effort_calculator.bash -d src/Controller/
 
 # Non-interactive with preset factors
-./code_effort_calculator.bash -p "type=version,complexity=2,familiarity=2,testing=y,ai=3" src/
+./code_effort_calculator.bash -p "type=version,complexity=2,familiarity=2,unittest=y,functest=3,ai=3" src/
 
 # Only override what you need — rest stays at defaults
 ./code_effort_calculator.bash -p "type=bugfix,complexity=1" src/
@@ -40,10 +40,11 @@ A bash-based tool that estimates development effort for code projects by analyzi
 ### Formula
 
 ```
-final_effort = coding_effort + documentation_overhead + ai_overhead
+final_effort = coding_effort + functest_effort + documentation_overhead + ai_overhead
 
-coding_effort = base_effort × complexity × familiarity × coupling × churn × testing × ai_reduction
-base_effort   = Σ (LOC_per_language ÷ rate_per_language)
+coding_effort  = base_effort × complexity × familiarity × coupling × churn × unittest × ai_reduction
+functest_effort = (coding_effort × functest_factor) + functest_buffer
+base_effort    = Σ (LOC_per_language ÷ rate_per_language)
 ```
 
 ---
@@ -173,6 +174,8 @@ The `#` column corresponds to the `complexity` value used in `--preset`.
 
 ### 6. Testing Overhead
 
+#### 6a. Unit/Integration Testing (Automated)
+
 **What it measures**: Additional effort required for creating or updating automated tests.
 
 | Selection | Factor | Added Effort |
@@ -180,7 +183,36 @@ The `#` column corresponds to the `complexity` value used in `--preset`.
 | No | ×1.00 | No additional effort |
 | Yes | ×1.30 | +30% to coding effort |
 
-**Why it matters**: Writing proper tests (unit, integration, or e2e) typically adds ~30% to the pure coding effort. This includes writing the tests, setting up fixtures/mocks, and ensuring coverage.
+**Preset key**: `unittest=y` or `unittest=n` (also accepts legacy `testing=y/n` for backward compatibility)
+
+**Why it matters**: Writing proper automated tests (unit, integration, or e2e suites) typically adds ~30% to the pure coding effort. This includes writing the tests, setting up fixtures/mocks, and ensuring coverage.
+
+#### 6b. Functional Testing (Manual/QA)
+
+**What it measures**: Effort for manual functional testing and QA — running through test scenarios, verifying behavior across environments, and documenting results. This is additive to coding effort.
+
+**Formula**: `functest_effort = (coding_effort × factor) + fixed_buffer`
+
+| Level | Factor | Buffer | Total Example (10h coding) | Use Case |
+|-------|--------|--------|---------------------------|----------|
+| None | — | — | +0h | No manual testing needed |
+| Basic | ×0.30 | +1.0h | +4.0h | Backend-only, internal logic, happy path |
+| Standard | ×0.35 | +1.5h | +5.0h | Mixed frontend/backend, API calls |
+| Complex | ×0.50 | +2.0h | +7.0h | UI + third-party APIs, multi-browser, multi-env |
+
+**Preset key**: `functest=0` (none), `functest=1` (basic), `functest=2` (standard), `functest=3` (complex)
+
+**Why the factor varies by level** (factor range 0.3x–0.5x based on Microsoft's internal QA research from the "Code Complete" era, validated against real-world plugin agency experience):
+
+- **Basic (0.3x)**: Pure backend plugins with internal logic are fast to verify — a few API calls or CLI commands cover the happy path and edge cases.
+- **Standard (0.35x)**: When frontend components or API integrations are involved, testing requires more workflows, form validation, and error handling verification.
+- **Complex (0.5x)**: Third-party API sandboxes, multi-browser testing, responsive checks, multiple CMS/framework versions, and permission matrices all compound the effort significantly.
+
+**Why a fixed buffer exists**: Regardless of coding size, every functional testing cycle has irreducible setup time — configuring test data, spinning up sandbox environments, documenting test results. This costs 1–2 hours whether the plugin is trivial or large.
+
+**Design note**: Both unit testing (×1.30 multiplier) and functional testing (additive) can be active simultaneously. A project may need automated test coverage *and* manual QA. They're independent costs that address different quality dimensions.
+
+> **Tip — Playwright / AI-assisted functional testing**: If functional tests are automated with tools like Playwright or generated via AI, don't increase `functest` — instead use `unittest=y` + `ai=3` to capture the effort of writing/generating those test scripts. The `functest` level can then drop to `0` or `1` (basic smoke test only), since the automated suite covers the repetitive flows. This keeps each parameter measuring one axis cleanly: `functest` = manual QA scope, `unittest` = automated test code, `ai` = tooling assistance.
 
 ---
 
@@ -255,9 +287,12 @@ The `-p` / `--preset` flag runs the tool without prompts, using the factors you 
 | `type` | `enhancement`, `bugfix`, `version`, `refactoring` | `enhancement` |
 | `complexity` | `1`, `2`, `3` (maps to the levels per work type) | `2` |
 | `familiarity` | `1`=own, `2`=team, `3`=inherited, `4`=unknown | `1` |
-| `testing` | `y` or `n` | `n` |
+| `unittest` | `y` or `n` (automated unit/integration tests) | `n` |
+| `functest` | `0`=none, `1`=basic, `2`=standard, `3`=complex | `0` |
 | `doc` | `1`=none, `2`=minor, `3`=standard, `4`=extensive | `1` |
 | `ai` | `1`=none, `2`=light, `3`=moderate, `4`=heavy | `1` |
+
+> **Backward compatibility**: The legacy key `testing=y/n` still works and maps to `unittest`.
 
 ---
 
@@ -290,7 +325,9 @@ Every estimate is logged to `~/.effort_history.csv` for historical calibration. 
 | `familiarity_factor` | Codebase familiarity multiplier |
 | `coupling_factor` | Dependency coupling |
 | `churn_factor` | Git history factor |
-| `testing_factor` | Testing overhead |
+| `testing_factor` | Unit testing overhead |
+| `functest_level` | Functional testing level selected |
+| `functest_effort_days` | Functional testing time added |
 | `ai_coding_factor` | AI reduction multiplier |
 | `ai_level` | AI assistance level selected |
 | `ai_overhead_days` | AI overhead added |
