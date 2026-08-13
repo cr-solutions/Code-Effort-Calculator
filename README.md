@@ -278,6 +278,8 @@ Even a one-line fix requires these steps.
 
 The tool automatically detects whether you're analyzing a single file, a small directory, or a large project, and scales the **overhead minimum floors** accordingly. This prevents fixed overheads (AI prompt engineering, test setup buffers) from dominating the estimate on small tasks.
 
+**Only applies to Enhancement and Bugfix work types.** Refactoring and Version Compatibility always use full overhead floors regardless of file count, because they require understanding broader architecture, reading changelogs, and careful review even for a single file.
+
 | Scope | Detection | Floor Scale | Effect |
 |-------|-----------|-------------|--------|
 | Single file | File path passed directly | ×0.25 | AI min floors and functest buffers reduced to 25% |
@@ -290,10 +292,11 @@ The tool automatically detects whether you're analyzing a single file, a small d
 
 **What it does not affect:**
 - The percentage-based calculations (AI factor × base_effort, functest factor × coding_effort)
-- The minimum effort floor (0.25 days always applies regardless of scope)
+- The minimum effort floor (always applies regardless of scope)
 - All other multipliers (complexity, familiarity, coupling, churn, unit testing)
+- Refactoring and Version Compatibility work types (always full floors)
 
-**Rationale**: A single controller file doesn't need 2 hours of prompt engineering or 1 hour of test environment setup. The developer is already in context, the environment is already running, and the AI interaction is a quick prompt-and-review cycle rather than a structured RE workflow.
+**Rationale**: A single controller file doesn't need 2 hours of prompt engineering or 1 hour of test environment setup. The developer is already in context, the environment is already running, and the AI interaction is a quick prompt-and-review cycle rather than a structured RE workflow. However, refactoring or version migrations on a single file still carry full overhead because they require broader architectural understanding.
 
 ---
 

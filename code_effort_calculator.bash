@@ -675,11 +675,6 @@ calculate_effort() {
         printf "${GREEN}${CHECK} churn ×%s${NC}\n" "$churn_factor"
     fi
 
-    # Display scope detection (affects overhead floors)
-    if [ "$scope_scale" != "1.00" ]; then
-        printf "  ${DIM}Scope detection:${NC}       ${CYAN}%s${NC} ${DIM}(overhead floors ×%s)${NC}\n" "$scope_label" "$scope_scale"
-    fi
-
     # Complexity selection
     section_header "4" "Work Type & Complexity"
     local selection_type=""
@@ -739,6 +734,19 @@ calculate_effort() {
     fi
 
     printf "\n  ${ARROW} Selected: ${BOLD}%s${NC} ${DIM}(×%s)${NC}\n" "$selection_type" "$complexity_factor"
+
+    # Disable scope scaling for refactoring and version compatibility
+    # These work types carry full overhead regardless of file count because they
+    # require understanding broader architecture, reading changelogs, and careful review
+    if [[ "$selection_type" == Refactoring* || "$selection_type" == "Version Compatibility"* ]]; then
+        scope_scale="1.00"
+        scope_label="full"
+    fi
+
+    # Display scope detection if scaling is active
+    if [ "$scope_scale" != "1.00" ]; then
+        printf "\n  ${DIM}Scope:${NC} ${CYAN}%s${NC} ${DIM}(overhead floors ×%s)${NC}\n" "$scope_label" "$scope_scale"
+    fi
 
     # Familiarity factor — whether the developer knows this codebase
     # One of the biggest real-world multipliers for productivity
