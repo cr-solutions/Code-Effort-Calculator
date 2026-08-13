@@ -2,6 +2,8 @@
 
 A bash-based tool that estimates development effort for code projects by analyzing lines of code, language complexity, git history, and additional workflow factors including or excluding the use of AI.
 
+Enterprise-grade cost estimates that are not based on developers' gut feelings, story points, or pull request counts, but rather on measurable data and insights from industry research (Microsoft QA studies, COCOMO-inspired models, real-world agency calibration).
+
 ## Usage
 
 ```bash
