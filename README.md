@@ -274,6 +274,27 @@ Any estimate below **0.25 days (2 hours)** is automatically raised to the floor.
 
 Even a one-line fix requires these steps.
 
+### 10. Automatic Scope Scaling
+
+The tool automatically detects whether you're analyzing a single file, a small directory, or a large project, and scales the **overhead minimum floors** accordingly. This prevents fixed overheads (AI prompt engineering, test setup buffers) from dominating the estimate on small tasks.
+
+| Scope | Detection | Floor Scale | Effect |
+|-------|-----------|-------------|--------|
+| Single file | File path passed directly | ×0.25 | AI min floors and functest buffers reduced to 25% |
+| Small scope (≤ 3 files) | Directory with 1–3 source files | ×0.50 | Floors reduced to 50% |
+| Full scope (4+ files) | Directory with 4+ source files | ×1.00 | Standard floors apply |
+
+**What it affects:**
+- AI overhead minimum floors (e.g., "Moderate" min drops from 2h → 30min for single files)
+- Functional testing fixed buffers (e.g., "Basic" buffer drops from 1h → 15min for single files)
+
+**What it does not affect:**
+- The percentage-based calculations (AI factor × base_effort, functest factor × coding_effort)
+- The minimum effort floor (0.25 days always applies regardless of scope)
+- All other multipliers (complexity, familiarity, coupling, churn, unit testing)
+
+**Rationale**: A single controller file doesn't need 2 hours of prompt engineering or 1 hour of test environment setup. The developer is already in context, the environment is already running, and the AI interaction is a quick prompt-and-review cycle rather than a structured RE workflow.
+
 ---
 
 ## Presets (Non-Interactive Mode)
@@ -358,8 +379,8 @@ All rates and thresholds are defined as variables at the top of the script. Adju
 # Example: Your team is faster with Python
 PYTHON_RATE=700
 
-# Example: Raise the minimum floor to 4 hours
-MIN_EFFORT_DAYS=0.50
+# Example: Raise the minimum floor to 3 hours
+MIN_EFFORT_MIN=180
 ```
 
 ### Excluded Directories

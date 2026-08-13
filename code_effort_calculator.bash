@@ -58,8 +58,10 @@ YAML_RATE=900        # Config, declarative
 # These are third-party code that should not count towards effort estimation
 EXCLUDE_DIRS=(vendor node_modules .vendor dist build .git __pycache__ .venv venv)
 
-# Minimum effort floor in days (0.25 = 2 hours)
-MIN_EFFORT_DAYS=0.25
+# Minimum effort floor (risk buffer for irreducible overhead)
+# Set in minutes for readability; converted to days internally
+MIN_EFFORT_MIN=120       # 120 minutes = 2 hours
+MIN_EFFORT_DAYS=$(awk "BEGIN {printf \"%.6f\", $MIN_EFFORT_MIN / 480}")  # 480 min = 8h = 1 day
 
 # ══════════════════════════════════════════════════════════════════════
 # TERMINAL COLORS & FORMATTING
@@ -508,6 +510,25 @@ calculate_effort() {
     shell_loc=${shell_loc:-0}; sql_loc=${sql_loc:-0}
     html_loc=${html_loc:-0}; css_loc=${css_loc:-0}; yaml_loc=${yaml_loc:-0}
 
+    # Detect scope size for automatic overhead floor scaling
+    # Single files and small directories get reduced minimum floors
+    local scope_file_count=1
+    local scope_scale="1.00"
+    local scope_label="full"
+    if [ -f "$path" ]; then
+        scope_file_count=1
+        scope_scale="0.25"
+        scope_label="single-file"
+    elif [ -d "$path" ]; then
+        scope_file_count=$(echo "$cloc_output" | awk '/^SUM:/ {print $2}')
+        scope_file_count=${scope_file_count:-$(echo "$cloc_output" | awk '/text file/ {print $1}')}
+        scope_file_count=${scope_file_count:-1}
+        if [ "$scope_file_count" -le 3 ]; then
+            scope_scale="0.50"
+            scope_label="small (${scope_file_count} files)"
+        fi
+    fi
+
     # Calculate graduated template contributions (Twig, Jinja2)
     local twig_contribution
     twig_contribution=$(calculate_template_contribution "$twig_loc")
@@ -652,6 +673,11 @@ calculate_effort() {
         printf "${YELLOW}churn ×%s${NC}\n" "$churn_factor"
     else
         printf "${GREEN}${CHECK} churn ×%s${NC}\n" "$churn_factor"
+    fi
+
+    # Display scope detection (affects overhead floors)
+    if [ "$scope_scale" != "1.00" ]; then
+        printf "  ${DIM}Scope detection:${NC}       ${CYAN}%s${NC} ${DIM}(overhead floors ×%s)${NC}\n" "$scope_label" "$scope_scale"
     fi
 
     # Complexity selection
@@ -930,17 +956,17 @@ calculate_effort() {
                 ;;
             2)
                 ai_coding_factor="0.85"
-                ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.05; if (v < 0.125) v = 0.125; printf \"%.6f\", v}")
+                ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.05; floor = 0.125 * $scope_scale; if (v < floor) v = floor; printf \"%.6f\", v}")
                 ai_level="Light"
                 ;;
             3)
                 ai_coding_factor="0.65"
-                ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.10; if (v < 0.250) v = 0.250; printf \"%.6f\", v}")
+                ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.10; floor = 0.250 * $scope_scale; if (v < floor) v = floor; printf \"%.6f\", v}")
                 ai_level="Moderate"
                 ;;
             4)
                 ai_coding_factor="0.45"
-                ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.15; if (v < 0.500) v = 0.500; printf \"%.6f\", v}")
+                ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.15; floor = 0.500 * $scope_scale; if (v < floor) v = floor; printf \"%.6f\", v}")
                 ai_level="Heavy (Agentic AI)"
                 ;;
             *)
@@ -970,20 +996,20 @@ calculate_effort() {
                         ;;
                     2)
                         ai_coding_factor="0.85"   # 15% coding reduction
-                        # Overhead scales with base effort: minimum 1h, grows with project size
-                        ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.05; if (v < 0.125) v = 0.125; printf \"%.6f\", v}")
+                        # Overhead scales with base effort: minimum floor adjusted by scope
+                        ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.05; floor = 0.125 * $scope_scale; if (v < floor) v = floor; printf \"%.6f\", v}")
                         ai_level="Light"
                         ;;
                     3)
                         ai_coding_factor="0.65"   # 35% coding reduction
-                        # Overhead scales: minimum 2h, ~10% of base for prompt engineering + review
-                        ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.10; if (v < 0.250) v = 0.250; printf \"%.6f\", v}")
+                        # Overhead scales: floor adjusted by scope for prompt engineering + review
+                        ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.10; floor = 0.250 * $scope_scale; if (v < floor) v = floor; printf \"%.6f\", v}")
                         ai_level="Moderate"
                         ;;
                     4)
                         ai_coding_factor="0.45"   # 55% coding reduction
-                        # Overhead scales: minimum 4h, ~15% of base for RE workflow + validation
-                        ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.15; if (v < 0.500) v = 0.500; printf \"%.6f\", v}")
+                        # Overhead scales: floor adjusted by scope for RE workflow + validation
+                        ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.15; floor = 0.500 * $scope_scale; if (v < floor) v = floor; printf \"%.6f\", v}")
                         ai_level="Heavy (Agentic AI)"
                         ;;
                 esac
@@ -1018,11 +1044,16 @@ calculate_effort() {
     coding_effort=$(awk "BEGIN {printf \"%.6f\", $base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor}")
 
     # Calculate functional testing effort based on coding effort
+    # Buffer is scaled by scope (single file = 25%, small dir = 50%, full = 100%)
     if [ "$functest_level" != "None" ]; then
-        functest_effort_days=$(awk "BEGIN {printf \"%.6f\", ($coding_effort * $functest_factor) + $functest_buffer_days}")
+        functest_effort_days=$(awk "BEGIN {printf \"%.6f\", ($coding_effort * $functest_factor) + ($functest_buffer_days * $scope_scale)}")
     fi
 
     final_effort=$(awk "BEGIN {printf \"%.6f\", $coding_effort + $doc_effort_days + $ai_overhead_days + $functest_effort_days}")
+
+    # Store raw (unfloored) effort for display
+    local raw_effort="$final_effort"
+    local raw_hours raw_full_hours raw_minutes
 
     # Apply minimum effort floor
     local floored=false
@@ -1030,6 +1061,11 @@ calculate_effort() {
         final_effort="$MIN_EFFORT_DAYS"
         floored=true
     fi
+
+    # Calculate raw time display (before floor)
+    raw_hours=$(awk "BEGIN {printf \"%.6f\", $raw_effort * 8}")
+    raw_full_hours=$(awk "BEGIN {printf \"%d\", int($raw_hours)}")
+    raw_minutes=$(awk "BEGIN {printf \"%d\", ($raw_hours - int($raw_hours)) * 60}")
 
     # Calculate total hours and split into hours and minutes using awk
     local total_hours
@@ -1043,7 +1079,7 @@ calculate_effort() {
 
     # coding_effort already calculated above (before functest)
 
-    # Final results box
+    # Calculation breakdown box
     echo ""
     printf "  ${CYAN}${BOX_TL}"
     printf '%0.s'"$BOX_H" $(seq 1 58)
@@ -1058,7 +1094,7 @@ calculate_effort() {
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Familiarity:${NC}       ×%s\n" "$familiarity_factor"
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Coupling:${NC}          ×%s\n" "$coupling_factor"
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Churn:${NC}             ×%s\n" "$churn_factor"
-    printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Testing:${NC}           ×%s\n" "$testing_factor"
+    printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Unit testing:${NC}      ×%s\n" "$testing_factor"
     if [ "$ai_level" != "None" ]; then
         printf "  ${CYAN}${BOX_V}${NC}  ${DIM}AI reduction:${NC}      ×%s (%s)\n" "$ai_coding_factor" "$ai_level"
     fi
@@ -1073,9 +1109,10 @@ calculate_effort() {
     if [ "$ai_level" != "None" ]; then
         printf "  ${CYAN}${BOX_V}${NC}  ${DIM}+ AI overhead:${NC}     +%s days ${DIM}(%s — RE/prompts/review)${NC}\n" "$ai_overhead_days" "$(days_to_hm "$ai_overhead_days")"
     fi
-
     if [ "$floored" = true ]; then
-        printf "  ${CYAN}${BOX_V}${NC}  ${YELLOW}${ARROW} Minimum floor applied (%s days)${NC}\n" "$MIN_EFFORT_DAYS"
+        printf "  ${CYAN}${BOX_V}${NC}  ${DIM}─────────────────────────────${NC}\n"
+        printf "  ${CYAN}${BOX_V}${NC}  ${DIM}= Calculated:${NC}      %s days ${DIM}(%s h %s min)${NC}\n" "$raw_effort" "$raw_full_hours" "$raw_minutes"
+        printf "  ${CYAN}${BOX_V}${NC}  ${YELLOW}${ARROW} Risk buffer:${NC}     raised to %s days ${DIM}(%s)${NC}\n" "$MIN_EFFORT_DAYS" "$(days_to_hm "$MIN_EFFORT_DAYS")"
     fi
 
     printf "  ${CYAN}${BOX_ML}"
@@ -1084,37 +1121,19 @@ calculate_effort() {
 
     printf "  ${CYAN}${BOX_V}${NC} ${BOLD}${WHITE}${STAR} FINAL ESTIMATE${NC}\n"
     printf "  ${CYAN}${BOX_V}${NC}\n"
-    printf "  ${CYAN}${BOX_V}${NC}    ${BOLD}${GREEN}%s days${NC}  ${DIM}|${NC}  ${BOLD}${GREEN}%s hours %s minutes${NC}\n" \
-        "$final_effort" "$full_hours" "$minutes"
+    if [ "$floored" = true ]; then
+        printf "  ${CYAN}${BOX_V}${NC}    ${BOLD}${YELLOW}%s days${NC}  ${DIM}|${NC}  ${BOLD}${YELLOW}%s hours %s minutes${NC} ${DIM}(risk buffer)${NC}\n" \
+            "$final_effort" "$full_hours" "$minutes"
+        printf "  ${CYAN}${BOX_V}${NC}    ${BOLD}${GREEN}%s h %s min${NC} ${DIM}(calculated — optimistic estimate)${NC}\n" \
+            "$raw_full_hours" "$raw_minutes"
+    else
+        printf "  ${CYAN}${BOX_V}${NC}    ${BOLD}${GREEN}%s days${NC}  ${DIM}|${NC}  ${BOLD}${GREEN}%s hours %s minutes${NC}\n" \
+            "$final_effort" "$full_hours" "$minutes"
+    fi
     printf "  ${CYAN}${BOX_V}${NC}\n"
-
     printf "  ${CYAN}${BOX_BL}"
     printf '%0.s'"$BOX_H" $(seq 1 58)
     printf "${NC}\n"
-
-    # Factor summary table
-    echo ""
-    printf "  ${DIM}Factor Breakdown:${NC}\n"
-    printf "  ${DIM}├── Base effort:${NC}    %s days ${DIM}(%s)${NC}\n" "$base_effort" "$(days_to_hm "$base_effort")"
-    printf "  ${DIM}├── × Complexity:${NC}   %s (%s)\n" "$complexity_factor" "$selection_type"
-    printf "  ${DIM}├── × Familiarity:${NC}  %s\n" "$familiarity_factor"
-    printf "  ${DIM}├── × Coupling:${NC}     %s\n" "$coupling_factor"
-    printf "  ${DIM}├── × Churn:${NC}        %s\n" "$churn_factor"
-    printf "  ${DIM}├── × Testing:${NC}      %s\n" "$testing_factor"
-    if [ "$ai_level" != "None" ]; then
-        printf "  ${DIM}├── × AI reduction:${NC} %s (%s)\n" "$ai_coding_factor" "$ai_level"
-    fi
-    printf "  ${DIM}├── = Coding:${NC}       %s days ${DIM}(%s)${NC}\n" "$coding_effort" "$(days_to_hm "$coding_effort")"
-    if [ "$functest_level" != "None" ]; then
-        printf "  ${DIM}├── + Func. testing:${NC} %s days ${DIM}(%s — %s)${NC}\n" "$functest_effort_days" "$(days_to_hm "$functest_effort_days")" "$functest_level"
-    fi
-    if [ "$doc_level" != "None" ]; then
-        printf "  ${DIM}├── + Documentation:${NC} %s days ${DIM}(%s — %s)${NC}\n" "$doc_effort_days" "$(days_to_hm "$doc_effort_days")" "$doc_level"
-    fi
-    if [ "$ai_level" != "None" ]; then
-        printf "  ${DIM}├── + AI overhead:${NC}  %s days ${DIM}(%s)${NC}\n" "$ai_overhead_days" "$(days_to_hm "$ai_overhead_days")"
-    fi
-    printf "  ${DIM}└── ${BOLD}= Total:${NC}       ${BOLD}%s days${NC} ${DIM}(%s h %s min)${NC}\n" "$final_effort" "$full_hours" "$minutes"
 
     # Log to history for calibration
     log_effort_history "$path" "$total_loc" "$selection_type" "$final_effort" \
