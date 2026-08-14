@@ -142,7 +142,7 @@ section_header() {
 # Function to print usage
 print_usage() {
     echo ""
-    printf "${BOLD}${CYAN}  Effort Calculator${NC} ${DIM}v3.0${NC}\n"
+    printf "${BOLD}${CYAN}  Effort Calculator${NC} ${DIM}v3.1${NC}\n"
     echo ""
     printf "  ${BOLD}USAGE:${NC}  $0 [OPTIONS] <file_or_directory> ...\n"
     echo ""
@@ -1165,6 +1165,31 @@ calculate_effort() {
         migration_research_days=$(awk "BEGIN {printf \"%.6f\", $migration_research_days * $mig_ai_factor}")
     fi
 
+    # AI also reduces documentation effort — AI can draft docs from code context.
+    # You still review/polish, but the bulk of writing is handled by AI.
+    # Reduction: None=1.0, Light=0.80, Moderate=0.50, Heavy=0.30
+    if [ "$(awk "BEGIN {print ($doc_effort_days > 0) ? 1 : 0}")" = "1" ] && [ "$ai_level" != "None" ]; then
+        local doc_ai_factor="1.00"
+        case "$ai_coding_factor" in
+            "0.85") doc_ai_factor="0.80" ;;   # Light: autocomplete helps with prose
+            "0.65") doc_ai_factor="0.50" ;;   # Moderate: AI drafts docs, you review and edit
+            "0.45") doc_ai_factor="0.30" ;;   # Heavy: AI generates complete docs, you proofread
+        esac
+        doc_effort_days=$(awk "BEGIN {printf \"%.6f\", $doc_effort_days * $doc_ai_factor}")
+    fi
+
+    # AI also reduces unit testing overhead — AI excels at generating test boilerplate,
+    # mocks, and assertions. Tests are more formulaic than production code.
+    # Reduction: testing_factor goes from 1.30 towards 1.00 as AI increases.
+    # None=1.30, Light=1.25, Moderate=1.15, Heavy=1.10
+    if [ "$testing_factor" != "1.00" ] && [ "$ai_level" != "None" ]; then
+        case "$ai_coding_factor" in
+            "0.85") testing_factor="1.25" ;;   # Light: autocomplete for test boilerplate
+            "0.65") testing_factor="1.15" ;;   # Moderate: AI generates test stubs
+            "0.45") testing_factor="1.10" ;;   # Heavy: AI generates full test suites, you review
+        esac
+    fi
+
     # Calculate coding effort first (needed for functest calculation)
     local coding_effort
     coding_effort=$(awk "BEGIN {printf \"%.6f\", $base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor}")
@@ -1217,10 +1242,31 @@ calculate_effort() {
 
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Base effort:${NC}       %s days ${DIM}(%s)${NC}\n" "$base_effort" "$(days_to_hm "$base_effort")"
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Complexity:${NC}        ×%s (%s)\n" "$complexity_factor" "$selection_type"
-    printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Familiarity:${NC}       ×%s\n" "$familiarity_factor"
+
+    # Familiarity label for breakdown
+    local fam_label=""
+    case "$familiarity_factor" in
+        "1.00") fam_label="Own code" ;;
+        "1.15") fam_label="Team code" ;;
+        "1.40") fam_label="Inherited" ;;
+        "1.70") fam_label="Unknown" ;;
+    esac
+    if [ "$familiarity_factor" != "1.00" ]; then
+        printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Familiarity:${NC}       ×%s (%s)\n" "$familiarity_factor" "$fam_label"
+    else
+        printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Familiarity:${NC}       ×%s\n" "$familiarity_factor"
+    fi
+
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Coupling:${NC}          ×%s\n" "$coupling_factor"
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Churn:${NC}             ×%s\n" "$churn_factor"
-    printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Unit testing:${NC}      ×%s\n" "$testing_factor"
+    if [ "$testing_factor" != "1.00" ]; then
+        # Calculate what unit testing adds in absolute time
+        local unittest_extra
+        unittest_extra=$(awk "BEGIN {printf \"%.6f\", ($coding_effort / $testing_factor) * ($testing_factor - 1)}")
+        printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Unit testing:${NC}      ×%s ${DIM}(+%s)${NC}\n" "$testing_factor" "$(days_to_hm "$unittest_extra")"
+    else
+        printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Unit testing:${NC}      ×%s\n" "$testing_factor"
+    fi
     if [ "$ai_level" != "None" ]; then
         printf "  ${CYAN}${BOX_V}${NC}  ${DIM}AI reduction:${NC}      ×%s (%s)\n" "$ai_coding_factor" "$ai_level"
     fi
@@ -1325,7 +1371,7 @@ fi
 # Banner
 echo ""
 printf "  ${BOLD}${CYAN}╔══════════════════════════════════════${NC}\n"
-printf "  ${BOLD}${CYAN}║  ${WHITE}${STAR} Effort Calculator v3.0 ${STAR}${NC}\n"
+printf "  ${BOLD}${CYAN}║  ${WHITE}${STAR} Effort Calculator v3.1 ${STAR}${NC}\n"
 printf "  ${BOLD}${CYAN}╚══════════════════════════════════════${NC}\n"
 printf "  ${DIM}$(date '+%Y-%m-%d %H:%M:%S')${NC}\n"
 

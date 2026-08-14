@@ -23,6 +23,9 @@
 ### Added
 
 - **Version Migration Research Overhead**: Automatic additive overhead for `type=version` tasks (2h/4h/6h based on complexity). Covers changelog reading, API investigation, trial-and-error, and community research — activities that aren't captured by LOC but are real work in any version migration. AI reduces this overhead (Light ×0.85, Moderate ×0.60, Heavy ×0.40) because AI can read and summarize changelogs and identify affected code.
+- **AI reduces documentation effort**: Doc overhead now scales with AI level (Light ×0.80, Moderate ×0.50, Heavy ×0.30). AI can draft documentation from code context — you review and polish instead of writing from scratch.
+- **AI reduces unit testing overhead**: Testing factor scales from ×1.30 (no AI) down to ×1.10 (heavy AI). AI excels at generating test boilerplate, mocks, and assertions — tests are more formulaic than production code.
+- **Coding effort hint in output**: When AI is active, the calculation breakdown shows `(= steering, review & integration)` below the coding effort line to clarify what that time represents with AI assistance.
 - **80% savings cap on AI overhead**: `overhead = min(overhead, savings × 0.80)`. Guarantees that AI always provides a net benefit regardless of task size. For tiny tasks where the floor would dominate, the cap prevents the overhead from exceeding 80% of what the AI actually saves.
 - **Consistent 0-based "none" values**: Both `doc` and `ai` preset keys now use `0` for "none", matching the existing `functest=0` convention.
 

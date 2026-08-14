@@ -44,10 +44,12 @@ Enterprise-grade cost estimates that are not based on developers' gut feelings, 
 ```
 final_effort = coding_effort + functest_effort + doc_overhead + ai_overhead + migration_research
 
-coding_effort  = base_effort × complexity × familiarity × coupling × churn × unittest × ai_reduction
-functest_effort = (coding_effort × functest_factor) + functest_buffer
-base_effort    = Σ (LOC_per_language ÷ rate_per_language)
+coding_effort    = base_effort × complexity × familiarity × coupling × churn × unittest × ai_reduction
+functest_effort  = (coding_effort × functest_factor) + functest_buffer
+base_effort      = Σ (LOC_per_language ÷ rate_per_language)
 ```
+
+> **Note**: When AI is active, `unittest`, `doc_overhead`, and `migration_research` are also reduced by AI-specific factors (see respective sections). All additive overheads benefit from AI assistance.
 
 ---
 
@@ -181,14 +183,23 @@ The `#` column corresponds to the `complexity` value used in `--preset`.
 
 **What it measures**: Additional effort required for creating or updating automated tests.
 
-| Selection | Factor | Added Effort |
+| Selection | Factor (no AI) | Added Effort |
 |-----------|--------|--------------|
 | No | ×1.00 | No additional effort |
 | Yes | ×1.30 | +30% to coding effort |
 
 **Preset key**: `unittest=y` or `unittest=n` (also accepts legacy `testing=y/n` for backward compatibility)
 
-**Why it matters**: Writing proper automated tests (unit, integration, or e2e suites) typically adds ~30% to the pure coding effort. This includes writing the tests, setting up fixtures/mocks, and ensuring coverage.
+**AI reduces testing overhead**: AI excels at generating test boilerplate, mocks, and assertions. Tests are more formulaic than production code, so AI helps more here than with business logic.
+
+| AI Level | Testing Factor | Rationale |
+|----------|:---:|---|
+| None | ×1.30 | Full manual test writing (+30%) |
+| Light | ×1.25 | Autocomplete for test boilerplate |
+| Moderate | ×1.15 | AI generates test stubs, you fill assertions |
+| Heavy | ×1.10 | AI generates full test suites, you review/tune |
+
+**Why it matters**: Writing proper automated tests (unit, integration, or e2e suites) typically adds ~30% to the pure coding effort. This includes writing the tests, setting up fixtures/mocks, and ensuring coverage. With AI, the overhead shrinks because test patterns are highly predictable.
 
 #### 6b. Functional Testing (Manual/QA)
 
@@ -223,7 +234,7 @@ The `#` column corresponds to the `complexity` value used in `--preset`.
 
 **What it measures**: Fixed time required for documentation updates, added as a flat amount on top of coding effort.
 
-| Level | # | Added Time | Examples |
+| Level | # | Added Time (no AI) | Examples |
 |-------|---|-----------|----------|
 | None | 0 | +0h | No docs needed |
 | Minor | 1 | +1h | Changelog entries, inline code comments |
@@ -231,6 +242,15 @@ The `#` column corresponds to the `complexity` value used in `--preset`.
 | Extensive | 3 | +6h | Architecture docs, developer guides, specs |
 
 **Preset key**: `doc=0` (none), `doc=1` (minor), `doc=2` (standard), `doc=3` (extensive)
+
+**AI reduces documentation effort**: When AI assistance is active, documentation time is reduced because AI can draft docs from the code context. You still review and polish the output.
+
+| AI Level | Doc Reduction | Rationale |
+|----------|:---:|---|
+| None | ×1.0 | Full manual writing |
+| Light | ×0.80 | Autocomplete helps with prose |
+| Moderate | ×0.50 | AI drafts docs, you review and edit |
+| Heavy | ×0.30 | AI generates complete docs, you proofread |
 
 **Why it's additive**: Documentation effort doesn't scale with code complexity — writing a README takes roughly the same time whether the feature was 100 or 1000 lines.
 
