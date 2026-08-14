@@ -1226,6 +1226,9 @@ calculate_effort() {
     fi
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}─────────────────────────────${NC}\n"
     printf "  ${CYAN}${BOX_V}${NC}  ${DIM}Coding effort:${NC}     %s days ${DIM}(%s)${NC}\n" "$coding_effort" "$(days_to_hm "$coding_effort")"
+    if [ "$ai_level" != "None" ]; then
+        printf "  ${CYAN}${BOX_V}${NC}  ${DIM}                   (= steering, review & integration)${NC}\n"
+    fi
     if [ "$functest_level" != "None" ]; then
         printf "  ${CYAN}${BOX_V}${NC}  ${DIM}+ Func. testing:${NC}   +%s days ${DIM}(%s — %s)${NC}\n" "$functest_effort_days" "$(days_to_hm "$functest_effort_days")" "$functest_level"
     fi

@@ -295,6 +295,17 @@ overhead = min(overhead, savings × 0.80)   ← cap: overhead never eats >80% of
 2. **Floor (minimum)**: Ensures a minimum meaningful AI interaction time (30min / 1h / 2h × scope_scale).
 3. **Savings cap (80%)**: Overhead can never exceed 80% of what AI saves. This guarantees AI always reduces total effort — it can never make the estimate worse than manual coding.
 
+#### What "coding effort with AI" actually means
+
+The AI coding factor (e.g. ×0.45) does **not** mean "AI does 55% and you do nothing." It means the combined effort of *you + AI working together* is 45% of what you'd spend alone. The remaining 45% is real work — just a different kind:
+
+- Steering the AI (providing context, specifying requirements)
+- Reviewing every AI-generated change for correctness
+- Fixing integration issues and edge cases the AI missed
+- Testing that the generated code compiles and behaves correctly
+
+This is why the "coding effort" line in the output shows a hint: `(= steering, review & integration)` when AI is active.
+
 #### What the AI overhead covers:
 
 - **Requirements Engineering**: Structuring prompts, defining acceptance criteria
