@@ -31,7 +31,7 @@ Enterprise-grade cost estimates that are not based on developers' gut feelings, 
 ./code_effort_calculator.bash -d src/Controller/
 
 # Non-interactive with preset factors
-./code_effort_calculator.bash -p "type=version,complexity=2,familiarity=2,unittest=y,functest=3,ai=3" src/
+./code_effort_calculator.bash -p "type=version,complexity=2,familiarity=2,unittest=y,functest=3,ai=2" src/
 
 # Only override what you need — rest stays at defaults
 ./code_effort_calculator.bash -p "type=bugfix,complexity=1" src/
@@ -42,7 +42,7 @@ Enterprise-grade cost estimates that are not based on developers' gut feelings, 
 ### Formula
 
 ```
-final_effort = coding_effort + functest_effort + documentation_overhead + ai_overhead
+final_effort = coding_effort + functest_effort + doc_overhead + ai_overhead + migration_research
 
 coding_effort  = base_effort × complexity × familiarity × coupling × churn × unittest × ai_reduction
 functest_effort = (coding_effort × functest_factor) + functest_buffer
@@ -104,24 +104,25 @@ An interactive selection that classifies the type and difficulty of work:
 | | Normal | 2 | ×0.4 | Multi-file change, moderate logic |
 | | Complex | 3 | ×0.6 | Architectural impact, many touch-points |
 | **Bugfix** | Trivial | 1 | ×0.1 | Quick patch, obvious root cause |
-| | Moderate | 2 | ×0.25 | Requires investigation, touches multiple files |
-| | Deep | 3 | ×0.5 | Root cause hunting, systemic issue |
-| **Version Compatibility** | Minor (<30% affected) | 1 | ×0.3 | Few API changes, mostly compatible |
-| | Major (30-60% affected) | 2 | ×0.5 | Significant migration, pattern-based changes |
-| | Full (>60% affected) | 3 | ×0.8 | Near-complete adaptation required |
-| **Refactoring** | Simple | 1 | ×1.0 | Rename, extract method, move class |
-| | Normal | 2 | ×1.3 | Restructure module, change patterns |
-| | Complex | 3 | ×1.8 | Architecture overhaul, deep redesign |
+| | Moderate | 2 | ×0.2 | Requires investigation, touches multiple files |
+| | Deep | 3 | ×0.35 | Root cause hunting, systemic issue |
+| **Version Compatibility** | Minor (<30% affected) | 1 | ×0.25 | Few API changes, mostly compatible |
+| | Major (30-60% affected) | 2 | ×0.45 | Significant migration, pattern-based changes |
+| | Full (>60% affected) | 3 | ×0.7 | Near-complete adaptation required |
+| **Refactoring** | Simple | 1 | ×0.4 | Rename, extract method, move class |
+| | Normal | 2 | ×0.6 | Restructure module, change patterns |
+| | Complex | 3 | ×0.85 | Architecture overhaul, deep redesign |
 
 The `#` column corresponds to the `complexity` value used in `--preset`.
 
 #### Design Rationale
 
-- **Enhancement/Bugfix factors are < 1.0** because you're modifying existing code, not writing all of it from scratch. A "Normal Enhancement" touches roughly 40% of the cognitive load that writing it fresh would require.
-- **Version Compatibility factors reflect that migrations are largely mechanical** — API renames, deprecation replacements, namespace shifts. Even "Major" (30-60% affected) uses ×0.5 because most changes are pattern-based rather than creative.
-- **Refactoring factors are ≥ 1.0** because restructuring requires understanding the existing design *and* creating a new one. Complex refactoring (×1.8) is significant but never exceeds writing-from-scratch effort (which would be the base effort itself).
+- **Enhancement factors are < 1.0** because you're adding to existing code, not rewriting all of it. A "Normal Enhancement" touches roughly 40% of the cognitive load that writing it fresh would require.
+- **Bugfix factors are the lowest** because you READ a lot of code but CHANGE only a small portion. Even a "Deep" bug (factor 0.35) involves extensive investigation but the actual fix is typically 5-20 lines. The factor captures investigation + fix effort combined.
+- **Version Compatibility factors reflect that migrations are largely mechanical** — API renames, deprecation replacements, namespace shifts. Even "Major" (30-60% affected) uses ×0.45 because most changes are pattern-based rather than creative. An additional **migration research overhead** is added automatically (see section 8).
+- **Refactoring factors range from 0.4 to 0.85** because refactoring reuses existing logic and domain knowledge. You understand the code already — you're reorganizing it, not inventing it. Simple refactoring (rename, extract, move) touches ~30-40% of the codebase effort. Complex refactoring (architectural overhaul) approaches but never reaches writing-from-scratch effort.
 
-> **Tip — Breaking API migrations**: For framework upgrades that constitute a complete API overhaul (e.g. Vue 2→3, Angular.js→Angular, Python 2→3), consider using `type=refactoring,complexity=2` (×1.3) instead of `type=version,complexity=3` (×0.8). Version Compatibility assumes largely mechanical, pattern-based changes. When the migration requires learning a fundamentally new paradigm (Composition API, new reactivity model, removed core features), the refactoring type better reflects the cognitive load involved.
+> **Tip — Breaking API migrations**: For framework upgrades that constitute a complete paradigm shift (e.g. Vue 2→3, Angular.js→Angular, Python 2→3), consider using `type=refactoring,complexity=2` (×0.6) instead of `type=version,complexity=3` (×0.7). Version Compatibility assumes largely mechanical, pattern-based changes. When the migration requires learning a fundamentally new paradigm (Composition API, new reactivity model, removed core features), the refactoring type better reflects the cognitive load involved.
 
 ---
 
@@ -214,7 +215,7 @@ The `#` column corresponds to the `complexity` value used in `--preset`.
 
 **Design note**: Both unit testing (×1.30 multiplier) and functional testing (additive) can be active simultaneously. A project may need automated test coverage *and* manual QA. They're independent costs that address different quality dimensions.
 
-> **Tip — Playwright / AI-assisted functional testing**: If functional tests are automated with tools like Playwright or generated via AI, don't increase `functest` — instead use `unittest=y` + `ai=3` to capture the effort of writing/generating those test scripts. The `functest` level can then drop to `0` or `1` (basic smoke test only), since the automated suite covers the repetitive flows. This keeps each parameter measuring one axis cleanly: `functest` = manual QA scope, `unittest` = automated test code, `ai` = tooling assistance.
+> **Tip — Playwright / AI-assisted functional testing**: If functional tests are automated with tools like Playwright or generated via AI, don't increase `functest` — instead use `unittest=y` + `ai=2` to capture the effort of writing/generating those test scripts. The `functest` level can then drop to `0` or `1` (basic smoke test only), since the automated suite covers the repetitive flows. This keeps each parameter measuring one axis cleanly: `functest` = manual QA scope, `unittest` = automated test code, `ai` = tooling assistance.
 
 ---
 
@@ -222,34 +223,77 @@ The `#` column corresponds to the `complexity` value used in `--preset`.
 
 **What it measures**: Fixed time required for documentation updates, added as a flat amount on top of coding effort.
 
-| Level | Added Time | Examples |
-|-------|-----------|----------|
-| None | +0h | No docs needed |
-| Minor | +1h | Changelog entries, inline code comments |
-| Standard | +3h | README updates, API documentation |
-| Extensive | +6h | Architecture docs, developer guides, specs |
+| Level | # | Added Time | Examples |
+|-------|---|-----------|----------|
+| None | 0 | +0h | No docs needed |
+| Minor | 1 | +1h | Changelog entries, inline code comments |
+| Standard | 2 | +3h | README updates, API documentation |
+| Extensive | 3 | +6h | Architecture docs, developer guides, specs |
+
+**Preset key**: `doc=0` (none), `doc=1` (minor), `doc=2` (standard), `doc=3` (extensive)
 
 **Why it's additive**: Documentation effort doesn't scale with code complexity — writing a README takes roughly the same time whether the feature was 100 or 1000 lines.
 
 ---
 
-### 8. AI-Assisted Development (LLM)
+### 8. Version Migration Research Overhead
 
-**What it measures**: The impact of using AI tools (like Claude Opus, GPT-4, GitHub Copilot) on development effort. This has two components:
+**What it measures**: Additional research time required specifically for version migration tasks. This overhead is **automatically added** when `type=version` and covers activities not captured by LOC:
+
+- Reading changelogs, migration guides, and release notes
+- Understanding new API semantics and behavioral changes
+- Trial-and-error when documentation is incomplete
+- Searching community forums for migration edge cases
+
+| Complexity | Added Time (no AI) | Scenario |
+|------------|-----------|----------|
+| Minor (comp=1) | +2h | Quick changelog scan, few breaking changes |
+| Major (comp=2) | +4h | Deep-dive into migration guides, testing new patterns |
+| Full (comp=3) | +6h | Extensive research, community forums, trial-and-error |
+
+**AI reduces research effort**: When AI assistance is active, migration research time is reduced because AI can read changelogs, identify breaking changes, and suggest migration patterns. You still need to verify, but the bulk of the reading/searching is handled by AI.
+
+| AI Level | Research Reduction | Rationale |
+|----------|:---:|---|
+| None | ×1.0 | Full manual research |
+| Light | ×0.85 | Minimal help (autocomplete doesn't read changelogs) |
+| Moderate | ×0.60 | AI summarizes changelogs, finds affected patterns |
+| Heavy | ×0.40 | AI reads all docs, identifies affected code — you verify |
+
+**Why it exists**: A version migration is fundamentally different from other work types because you're dealing with *external* changes you didn't make. The LOC-based model captures the mechanical code changes, but not the cognitive overhead of understanding what changed in the framework/library and how it affects your code. This overhead applies regardless of whether you use AI or not — you still need to understand the migration path.
+
+**Note**: This overhead only applies to `type=version`. Enhancement, bugfix, and refactoring tasks do not incur this overhead.
+
+---
+
+### 9. AI-Assisted Development (LLM)
+
+**What it measures**: The impact of using AI tools (like Claude, GPT-4, GitHub Copilot, Kiro) on development effort. This has two components:
 
 1. **Coding reduction** — a multiplier that reduces the coding effort
-2. **AI overhead** — time added for prompt engineering, review, and validation (scales with project size)
+2. **AI overhead** — time added for prompt engineering, review, and validation
 
-| Level | Coding Factor | Overhead | Net Impact |
-|-------|--------------|----------|------------|
-| No AI | ×1.00 | +0h | Full manual effort |
-| Light | ×0.85 (−15%) | min 1h, or 5% of base | Autocomplete, suggestions |
-| Moderate | ×0.65 (−35%) | min 2h, or 10% of base | Feature generation, refactoring |
-| Heavy (Agentic) | ×0.45 (−55%) | min 4h, or 15% of base | Full RE workflow, agentic AI |
+| Level | # | Coding Factor | Overhead | Use Case |
+|-------|---|--------------|----------|----------|
+| No AI | 0 | ×1.00 | +0h | Full manual effort |
+| Light | 1 | ×0.85 (−15%) | 10% of coding effort | Autocomplete, suggestions |
+| Moderate | 2 | ×0.65 (−35%) | 20% of coding effort | Feature generation, refactoring |
+| Heavy (Agentic) | 3 | ×0.45 (−55%) | 30% of coding effort | Full RE workflow, agentic AI |
 
-#### Scaling AI Overhead
+**Preset key**: `ai=0` (none), `ai=1` (light), `ai=2` (moderate), `ai=3` (heavy)
 
-Unlike v2.0 (which used fixed overhead), the AI overhead now scales with project size. For a 1-day base effort, the minimum floors apply (1h/2h/4h). For a 10-day base effort, overhead grows proportionally (4h/8h/12h) because larger projects require more prompt iteration, review cycles, and integration work.
+#### How AI Overhead is Calculated
+
+The AI overhead uses a three-part formula that ensures AI **always provides a net benefit**:
+
+```
+overhead = max(coding_effort_without_ai × percentage, floor × scope_scale)
+overhead = min(overhead, savings × 0.80)   ← cap: overhead never eats >80% of savings
+```
+
+1. **Proportional to coding effort** (not raw LOC): The overhead scales with the actual work being AI-assisted, after complexity/familiarity/coupling/churn/testing multipliers are applied.
+2. **Floor (minimum)**: Ensures a minimum meaningful AI interaction time (30min / 1h / 2h × scope_scale).
+3. **Savings cap (80%)**: Overhead can never exceed 80% of what AI saves. This guarantees AI always reduces total effort — it can never make the estimate worse than manual coding.
 
 #### What the AI overhead covers:
 
@@ -261,11 +305,9 @@ Unlike v2.0 (which used fixed overhead), the AI overhead now scales with project
 
 The "Heavy" level assumes use of structured Requirements Engineering workflows such as [Requirements-Engineering-Agentic-AI](https://github.com/cr-solutions/Requirements-Engineering-Agentic-AI).
 
-**Why both factors exist**: AI dramatically reduces raw coding time, but introduces new overhead for steering the AI correctly. The net effect is still positive for larger tasks but may not save time for trivial changes.
-
 ---
 
-### 9. Minimum Effort Floor
+### 10. Minimum Effort Floor
 
 Any estimate below **0.25 days (2 hours)** is automatically raised to the floor. This accounts for irreducible overhead:
 
@@ -276,7 +318,7 @@ Any estimate below **0.25 days (2 hours)** is automatically raised to the floor.
 
 Even a one-line fix requires these steps.
 
-### 10. Automatic Scope Scaling
+### 11. Automatic Scope Scaling
 
 The tool automatically detects whether you're analyzing a single file, a small directory, or a large project, and scales the **overhead minimum floors** accordingly. This prevents fixed overheads (AI prompt engineering, test setup buffers) from dominating the estimate on small tasks.
 
@@ -289,16 +331,16 @@ The tool automatically detects whether you're analyzing a single file, a small d
 | Full scope (4+ files) | Directory with 4+ source files | ×1.00 | Standard floors apply |
 
 **What it affects:**
-- AI overhead minimum floors (e.g., "Moderate" min drops from 2h → 30min for single files)
+- AI overhead minimum floors (e.g., "Moderate" min drops from 1h → 15min for single files)
 - Functional testing fixed buffers (e.g., "Basic" buffer drops from 1h → 15min for single files)
 
 **What it does not affect:**
-- The percentage-based calculations (AI factor × base_effort, functest factor × coding_effort)
+- The percentage-based calculations (AI factor × coding_effort, functest factor × coding_effort)
 - The minimum effort floor (always applies regardless of scope)
 - All other multipliers (complexity, familiarity, coupling, churn, unit testing)
 - Refactoring and Version Compatibility work types (always full floors)
 
-**Rationale**: A single controller file doesn't need 2 hours of prompt engineering or 1 hour of test environment setup. The developer is already in context, the environment is already running, and the AI interaction is a quick prompt-and-review cycle rather than a structured RE workflow. However, refactoring or version migrations on a single file still carry full overhead because they require broader architectural understanding.
+**Rationale**: A single controller file doesn't need 1 hour of prompt engineering or 1 hour of test environment setup. The developer is already in context, the environment is already running, and the AI interaction is a quick prompt-and-review cycle rather than a structured RE workflow. However, refactoring or version migrations on a single file still carry full overhead because they require broader architectural understanding.
 
 ---
 
@@ -315,8 +357,8 @@ The `-p` / `--preset` flag runs the tool without prompts, using the factors you 
 | `familiarity` | `1`=own, `2`=team, `3`=inherited, `4`=unknown | `1` |
 | `unittest` | `y` or `n` (automated unit/integration tests) | `n` |
 | `functest` | `0`=none, `1`=basic, `2`=standard, `3`=complex | `0` |
-| `doc` | `1`=none, `2`=minor, `3`=standard, `4`=extensive | `1` |
-| `ai` | `1`=none, `2`=light, `3`=moderate, `4`=heavy | `1` |
+| `doc` | `0`=none, `1`=minor, `2`=standard, `3`=extensive | `0` |
+| `ai` | `0`=none, `1`=light, `2`=moderate, `3`=heavy | `0` |
 
 > **Backward compatibility**: The legacy key `testing=y/n` still works and maps to `unittest`.
 
@@ -359,6 +401,7 @@ Every estimate is logged to `~/.effort_history.csv` for historical calibration. 
 | `ai_overhead_days` | AI overhead added |
 | `doc_level` | Documentation level selected |
 | `doc_effort_days` | Documentation time added |
+| `migration_research_days` | Version migration research time added |
 | `base_effort_days` | Before any multipliers |
 | `coding_effort_days` | After multipliers, before fixed additions |
 | `estimated_days` | Final total estimate |

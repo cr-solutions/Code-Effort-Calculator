@@ -157,13 +157,13 @@ print_usage() {
     printf "    ${DIM}familiarity${NC} Level: 1=own, 2=team, 3=inherited, 4=unknown\n"
     printf "    ${DIM}unittest${NC}    y or n (automated unit/integration tests)\n"
     printf "    ${DIM}functest${NC}    Level: 0=none, 1=basic, 2=standard, 3=complex\n"
-    printf "    ${DIM}doc${NC}         Level: 1=none, 2=minor, 3=standard, 4=extensive\n"
-    printf "    ${DIM}ai${NC}          Level: 1=none, 2=light, 3=moderate, 4=heavy\n"
+    printf "    ${DIM}doc${NC}         Level: 0=none, 1=minor, 2=standard, 3=extensive\n"
+    printf "    ${DIM}ai${NC}          Level: 0=none, 1=light, 2=moderate, 3=heavy\n"
     echo ""
     printf "  ${BOLD}EXAMPLES:${NC}\n"
     printf "    ${DIM}$0 src/${NC}\n"
     printf "    ${DIM}$0 -d src/Controller/ src/Service/${NC}\n"
-    printf "    ${DIM}$0 --preset \"type=version,complexity=2,familiarity=2,unittest=y,ai=3\" src/${NC}\n"
+    printf "    ${DIM}$0 --preset \"type=version,complexity=2,familiarity=2,unittest=y,ai=2\" src/${NC}\n"
     echo ""
     exit 1
 }
@@ -216,8 +216,8 @@ PRESET_COMPLEXITY=2
 PRESET_FAMILIARITY=1
 PRESET_UNITTEST="n"
 PRESET_FUNCTEST=0
-PRESET_DOC=1
-PRESET_AI=1
+PRESET_DOC=0
+PRESET_AI=0
 
 if [ -n "$preset_string" ]; then
     # Preset implies non-interactive
@@ -246,10 +246,10 @@ if [ -n "$preset_string" ]; then
 fi
 
 # Function to get complexity options based on type
-# Enhancement: fraction of base effort because you're adding to existing code, not rewriting all of it
-# Bugfix: typically touches a small portion of the codebase
-# Version Compatibility: scaled by how much of the codebase is affected
-# Refactoring: restructuring existing code, not writing from scratch
+# Enhancement: fraction of base effort — you're adding to existing code, not rewriting all of it
+# Bugfix: investigation + fix; trivial = quick patch, deep = full understanding + careful fix
+# Version Compatibility: mechanical migrations scaled by affected codebase percentage
+# Refactoring: restructuring existing code — you understand the logic, just reorganize it
 get_complexity_options() {
     local work_type="$1"
     local output_type="$2"  # 'levels' or 'factors'
@@ -259,7 +259,9 @@ get_complexity_options() {
             if [ "$output_type" = "levels" ]; then
                 echo "Simple Normal Complex"
             else
-                # Realistic: simple change touches ~20% of logic, complex ~60%
+                # Simple: touches ~20% of logic (add a field, new endpoint)
+                # Normal: touches ~40% (new feature interacting with existing)
+                # Complex: touches ~60% (major feature, cross-cutting concerns)
                 echo "0.2 0.4 0.6"
             fi
             ;;
@@ -267,8 +269,11 @@ get_complexity_options() {
             if [ "$output_type" = "levels" ]; then
                 echo "Trivial Moderate Deep"
             else
-                # Bugfixes: trivial is a quick patch, deep requires full understanding
-                echo "0.1 0.25 0.5"
+                # Trivial: obvious fix, minimal investigation (typo, wrong config, off-by-one)
+                # Moderate: requires understanding component interactions, touch ~20% of code
+                # Deep: hard-to-reproduce, requires deep analysis; you READ a lot but CHANGE little
+                #   Factor 0.35 (not 0.5) because the fix itself is small even if investigation is long
+                echo "0.1 0.2 0.35"
             fi
             ;;
         "Version Compatibility")
@@ -277,17 +282,20 @@ get_complexity_options() {
             else
                 # Version migrations are largely mechanical (API renames, deprecations)
                 # Only a fraction of "affected" code requires real cognitive effort
-                # Factor reflects that most changes are pattern-based, not creative
-                echo "0.3 0.5 0.8"
+                # Most changes are pattern-based find-and-replace or signature updates
+                echo "0.25 0.45 0.7"
             fi
             ;;
         "Refactoring")
             if [ "$output_type" = "levels" ]; then
                 echo "Simple Normal Complex"
             else
-                # Refactoring reuses existing logic; never exceeds writing-from-scratch effort
-                # Replaced old 2.5/3.0/3.6 factors which were unrealistically high
-                echo "1.0 1.3 1.8"
+                # Refactoring reuses existing logic — you understand the code, you reorganize it
+                # Simple: rename, extract method/class, move files, reorganize imports (~30-40% touched)
+                # Normal: change design patterns, introduce abstractions, split/merge classes (~50-60%)
+                # Complex: architectural overhaul (monolith→modules, sync→async) — approaches but
+                #   never exceeds rewrite effort because you still reuse domain knowledge + tests
+                echo "0.4 0.6 0.85"
             fi
             ;;
     esac
@@ -423,10 +431,11 @@ log_effort_history() {
     local familiarity_factor="${17}"
     local functest_level="${18}"
     local functest_effort_days="${19}"
+    local migration_research_days="${20}"
 
     # Create header if file doesn't exist
     if [ ! -f "$EFFORT_HISTORY_FILE" ]; then
-        echo "date,timestamp_unix,path,basename,total_weighted_loc,php,js,ts,java,kotlin,rust,go,python,csharp,ruby,swift,scala,dart,c,cpp,shell,sql,twig,jinja2,html,css,yaml,work_type,complexity_factor,familiarity_factor,coupling_factor,churn_factor,testing_factor,functest_level,functest_effort_days,ai_coding_factor,ai_level,ai_overhead_days,doc_level,doc_effort_days,base_effort_days,coding_effort_days,estimated_days,estimated_hours,floored" > "$EFFORT_HISTORY_FILE"
+        echo "date,timestamp_unix,path,basename,total_weighted_loc,php,js,ts,java,kotlin,rust,go,python,csharp,ruby,swift,scala,dart,c,cpp,shell,sql,twig,jinja2,html,css,yaml,work_type,complexity_factor,familiarity_factor,coupling_factor,churn_factor,testing_factor,functest_level,functest_effort_days,ai_coding_factor,ai_level,ai_overhead_days,doc_level,doc_effort_days,migration_research_days,base_effort_days,coding_effort_days,estimated_days,estimated_hours,floored" > "$EFFORT_HISTORY_FILE"
     fi
 
     local basename_path
@@ -435,12 +444,12 @@ log_effort_history() {
     unix_ts=$(date +%s)
     local floored_flag="no"
     local raw_effort
-    raw_effort=$(awk "BEGIN {printf \"%.6f\", ($base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor) + $doc_effort_days + $ai_overhead_days + $functest_effort_days}")
+    raw_effort=$(awk "BEGIN {printf \"%.6f\", ($base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor) + $doc_effort_days + $ai_overhead_days + $functest_effort_days + $migration_research_days}")
     if (( $(awk "BEGIN {print ($final_effort == $MIN_EFFORT_DAYS && $raw_effort < $MIN_EFFORT_DAYS) ? 1 : 0}") )); then
         floored_flag="yes"
     fi
 
-    echo "$(date -Iseconds),$unix_ts,\"$path\",\"$basename_path\",$total_loc,$php_loc,$js_loc,$ts_loc,$java_loc,$kotlin_loc,$rust_loc,$go_loc,$python_loc,$csharp_loc,$ruby_loc,$swift_loc,$scala_loc,$dart_loc,$c_loc,$cpp_loc,$shell_loc,$sql_loc,$twig_loc,$jinja2_loc,$html_loc,$css_loc,$yaml_loc,\"$selection_type\",$complexity_factor,$familiarity_factor,$coupling_factor,$churn_factor,$testing_factor,\"$functest_level\",$functest_effort_days,$ai_coding_factor,\"$ai_level\",$ai_overhead_days,\"$doc_level\",$doc_effort_days,$base_effort,$coding_effort,$final_effort,$total_hours,$floored_flag" >> "$EFFORT_HISTORY_FILE"
+    echo "$(date -Iseconds),$unix_ts,\"$path\",\"$basename_path\",$total_loc,$php_loc,$js_loc,$ts_loc,$java_loc,$kotlin_loc,$rust_loc,$go_loc,$python_loc,$csharp_loc,$ruby_loc,$swift_loc,$scala_loc,$dart_loc,$c_loc,$cpp_loc,$shell_loc,$sql_loc,$twig_loc,$jinja2_loc,$html_loc,$css_loc,$yaml_loc,\"$selection_type\",$complexity_factor,$familiarity_factor,$coupling_factor,$churn_factor,$testing_factor,\"$functest_level\",$functest_effort_days,$ai_coding_factor,\"$ai_level\",$ai_overhead_days,\"$doc_level\",$doc_effort_days,$migration_research_days,$base_effort,$coding_effort,$final_effort,$total_hours,$floored_flag" >> "$EFFORT_HISTORY_FILE"
 }
 
 # Function to calculate effort for a single file
@@ -907,12 +916,12 @@ calculate_effort() {
 
     if [ "$non_interactive" = true ]; then
         case "$PRESET_DOC" in
-            1) doc_effort_days="0.000000"; doc_level="None" ;;
-            2) doc_effort_days="0.125000"; doc_level="Minor" ;;
-            3) doc_effort_days="0.375000"; doc_level="Standard" ;;
-            4) doc_effort_days="0.750000"; doc_level="Extensive" ;;
+            0) doc_effort_days="0.000000"; doc_level="None" ;;
+            1) doc_effort_days="0.125000"; doc_level="Minor" ;;
+            2) doc_effort_days="0.375000"; doc_level="Standard" ;;
+            3) doc_effort_days="0.750000"; doc_level="Extensive" ;;
             *)
-                printf "  ${RED}Invalid doc level: %s (valid: 1-4)${NC}\n" "$PRESET_DOC"
+                printf "  ${RED}Invalid doc level: %s (valid: 0-3)${NC}\n" "$PRESET_DOC"
                 exit 1
                 ;;
         esac
@@ -949,36 +958,107 @@ calculate_effort() {
         printf "\n  ${GREEN}${CHECK} No documentation overhead${NC}\n"
     fi
 
+    # ──────────────────────────────────────────────────────────────────
+    # Version Migration Research Overhead (automatic for type=version)
+    # ──────────────────────────────────────────────────────────────────
+    # Version migrations have hidden overhead not captured by LOC:
+    #   - Reading changelogs, migration guides, release notes
+    #   - Understanding new API semantics and behavioral changes
+    #   - Trial-and-error when documentation is incomplete
+    #   - Searching for community solutions to migration edge cases
+    # This is additive and scales with complexity level, not LOC.
+    local migration_research_days="0.000000"
+
+    if [[ "$selection_type" == "Version Compatibility"* ]]; then
+        section_header "6b" "Version Migration Research"
+        # Determine research overhead from complexity factor:
+        # ×0.25 (Minor): 2h reading changelogs + quick API checks
+        # ×0.45 (Major): 4h deep-dive into migration guides, testing patterns
+        # ×0.70 (Full):  6h extensive research, community forums, trial-and-error
+        if [ "$complexity_factor" = "0.25" ]; then
+            migration_research_days="0.250000"   # 2 hours
+        elif [ "$complexity_factor" = "0.45" ]; then
+            migration_research_days="0.500000"   # 4 hours
+        else
+            migration_research_days="0.750000"   # 6 hours (Full or unknown)
+        fi
+
+        local mig_hours
+        mig_hours=$(awk "BEGIN {printf \"%d\", int($migration_research_days * 8)}")
+        local mig_mins
+        mig_mins=$(awk "BEGIN {printf \"%d\", ($migration_research_days * 8 - int($migration_research_days * 8)) * 60}")
+        printf "  ${DIM}Version migrations require additional research time:${NC}\n"
+        printf "  ${DIM}  - Reading changelogs, migration guides, release notes${NC}\n"
+        printf "  ${DIM}  - Understanding new API semantics & behavioral changes${NC}\n"
+        printf "  ${DIM}  - Trial-and-error when docs are incomplete${NC}\n"
+        printf "\n  ${YELLOW}${ARROW} Migration research: +%s days (%s h %s min)${NC}\n" \
+            "$migration_research_days" "$mig_hours" "$mig_mins"
+    fi
+
     # AI LLM assistance question
     section_header "7" "AI-Assisted Development (LLM)"
     local ai_coding_factor="1.00"
     local ai_overhead_days="0.000000"
     local ai_level="None"
 
+    # Pre-compute coding effort WITHOUT AI to use as overhead basis and savings cap
+    # This is the actual work being AI-assisted, not the raw LOC base
+    local coding_effort_no_ai
+    coding_effort_no_ai=$(awk "BEGIN {printf \"%.6f\", $base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor}")
+
     if [ "$non_interactive" = true ]; then
         case "$PRESET_AI" in
-            1)
+            0)
                 ai_coding_factor="1.00"
                 ai_overhead_days="0.000000"
                 ai_level="None"
                 ;;
-            2)
+            1)
                 ai_coding_factor="0.85"
-                ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.05; floor = 0.125 * $scope_scale; if (v < floor) v = floor; printf \"%.6f\", v}")
+                # Overhead proportional to coding effort (not raw base_effort)
+                # Floor: 30min (×scope) — minimum context switch for copilot-style tools
+                # Cap: overhead never exceeds 80% of coding savings → AI always helps
+                ai_overhead_days=$(awk "BEGIN {
+                    v = $coding_effort_no_ai * 0.10;
+                    floor = 0.0625 * $scope_scale;
+                    if (v < floor) v = floor;
+                    savings = $coding_effort_no_ai * (1 - 0.85);
+                    cap = savings * 0.80;
+                    if (v > cap && cap > 0) v = cap;
+                    printf \"%.6f\", v
+                }")
                 ai_level="Light"
                 ;;
-            3)
+            2)
                 ai_coding_factor="0.65"
-                ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.10; floor = 0.250 * $scope_scale; if (v < floor) v = floor; printf \"%.6f\", v}")
+                # Floor: 1h (×scope) — minimum prompt engineering + review cycle
+                ai_overhead_days=$(awk "BEGIN {
+                    v = $coding_effort_no_ai * 0.20;
+                    floor = 0.125 * $scope_scale;
+                    if (v < floor) v = floor;
+                    savings = $coding_effort_no_ai * (1 - 0.65);
+                    cap = savings * 0.80;
+                    if (v > cap && cap > 0) v = cap;
+                    printf \"%.6f\", v
+                }")
                 ai_level="Moderate"
                 ;;
-            4)
+            3)
                 ai_coding_factor="0.45"
-                ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.15; floor = 0.500 * $scope_scale; if (v < floor) v = floor; printf \"%.6f\", v}")
+                # Floor: 2h (×scope) — minimum RE workflow + agentic validation
+                ai_overhead_days=$(awk "BEGIN {
+                    v = $coding_effort_no_ai * 0.30;
+                    floor = 0.250 * $scope_scale;
+                    if (v < floor) v = floor;
+                    savings = $coding_effort_no_ai * (1 - 0.45);
+                    cap = savings * 0.80;
+                    if (v > cap && cap > 0) v = cap;
+                    printf \"%.6f\", v
+                }")
                 ai_level="Heavy (Agentic AI)"
                 ;;
             *)
-                printf "  ${RED}Invalid AI level: %s (valid: 1-4)${NC}\n" "$PRESET_AI"
+                printf "  ${RED}Invalid AI level: %s (valid: 0-3)${NC}\n" "$PRESET_AI"
                 exit 1
                 ;;
         esac
@@ -1004,20 +1084,45 @@ calculate_effort() {
                         ;;
                     2)
                         ai_coding_factor="0.85"   # 15% coding reduction
-                        # Overhead scales with base effort: minimum floor adjusted by scope
-                        ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.05; floor = 0.125 * $scope_scale; if (v < floor) v = floor; printf \"%.6f\", v}")
+                        # Overhead proportional to coding effort (not raw base_effort)
+                        # Cap ensures AI always provides net benefit
+                        ai_overhead_days=$(awk "BEGIN {
+                            v = $coding_effort_no_ai * 0.10;
+                            floor = 0.0625 * $scope_scale;
+                            if (v < floor) v = floor;
+                            savings = $coding_effort_no_ai * (1 - 0.85);
+                            cap = savings * 0.80;
+                            if (v > cap && cap > 0) v = cap;
+                            printf \"%.6f\", v
+                        }")
                         ai_level="Light"
                         ;;
                     3)
                         ai_coding_factor="0.65"   # 35% coding reduction
-                        # Overhead scales: floor adjusted by scope for prompt engineering + review
-                        ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.10; floor = 0.250 * $scope_scale; if (v < floor) v = floor; printf \"%.6f\", v}")
+                        # Overhead proportional to coding effort with savings cap
+                        ai_overhead_days=$(awk "BEGIN {
+                            v = $coding_effort_no_ai * 0.20;
+                            floor = 0.125 * $scope_scale;
+                            if (v < floor) v = floor;
+                            savings = $coding_effort_no_ai * (1 - 0.65);
+                            cap = savings * 0.80;
+                            if (v > cap && cap > 0) v = cap;
+                            printf \"%.6f\", v
+                        }")
                         ai_level="Moderate"
                         ;;
                     4)
                         ai_coding_factor="0.45"   # 55% coding reduction
-                        # Overhead scales: floor adjusted by scope for RE workflow + validation
-                        ai_overhead_days=$(awk "BEGIN {v = $base_effort * 0.15; floor = 0.500 * $scope_scale; if (v < floor) v = floor; printf \"%.6f\", v}")
+                        # Overhead proportional to coding effort with savings cap
+                        ai_overhead_days=$(awk "BEGIN {
+                            v = $coding_effort_no_ai * 0.30;
+                            floor = 0.250 * $scope_scale;
+                            if (v < floor) v = floor;
+                            savings = $coding_effort_no_ai * (1 - 0.45);
+                            cap = savings * 0.80;
+                            if (v > cap && cap > 0) v = cap;
+                            printf \"%.6f\", v
+                        }")
                         ai_level="Heavy (Agentic AI)"
                         ;;
                 esac
@@ -1047,6 +1152,19 @@ calculate_effort() {
     local final_effort
     local functest_effort_days="0.000000"
 
+    # AI also reduces migration research effort — AI can read changelogs, identify
+    # breaking changes, and suggest migration patterns. But you still need to verify.
+    # Reduction: None=1.0, Light=0.85, Moderate=0.60, Heavy=0.40
+    if [ "$(awk "BEGIN {print ($migration_research_days > 0) ? 1 : 0}")" = "1" ] && [ "$ai_level" != "None" ]; then
+        local mig_ai_factor="1.00"
+        case "$ai_coding_factor" in
+            "0.85") mig_ai_factor="0.85" ;;   # Light: minimal help with research
+            "0.65") mig_ai_factor="0.60" ;;   # Moderate: AI summarizes changelogs, finds patterns
+            "0.45") mig_ai_factor="0.40" ;;   # Heavy: AI reads all docs, identifies affected code
+        esac
+        migration_research_days=$(awk "BEGIN {printf \"%.6f\", $migration_research_days * $mig_ai_factor}")
+    fi
+
     # Calculate coding effort first (needed for functest calculation)
     local coding_effort
     coding_effort=$(awk "BEGIN {printf \"%.6f\", $base_effort * $complexity_factor * $familiarity_factor * $coupling_factor * $churn_factor * $testing_factor * $ai_coding_factor}")
@@ -1057,7 +1175,7 @@ calculate_effort() {
         functest_effort_days=$(awk "BEGIN {printf \"%.6f\", ($coding_effort * $functest_factor) + ($functest_buffer_days * $scope_scale)}")
     fi
 
-    final_effort=$(awk "BEGIN {printf \"%.6f\", $coding_effort + $doc_effort_days + $ai_overhead_days + $functest_effort_days}")
+    final_effort=$(awk "BEGIN {printf \"%.6f\", $coding_effort + $doc_effort_days + $ai_overhead_days + $functest_effort_days + $migration_research_days}")
 
     # Store raw (unfloored) effort for display
     local raw_effort="$final_effort"
@@ -1117,6 +1235,9 @@ calculate_effort() {
     if [ "$ai_level" != "None" ]; then
         printf "  ${CYAN}${BOX_V}${NC}  ${DIM}+ AI overhead:${NC}     +%s days ${DIM}(%s — RE/prompts/review)${NC}\n" "$ai_overhead_days" "$(days_to_hm "$ai_overhead_days")"
     fi
+    if [ "$(awk "BEGIN {print ($migration_research_days > 0) ? 1 : 0}")" = "1" ]; then
+        printf "  ${CYAN}${BOX_V}${NC}  ${DIM}+ Migration R&D:${NC}   +%s days ${DIM}(%s — changelogs/guides/trial)${NC}\n" "$migration_research_days" "$(days_to_hm "$migration_research_days")"
+    fi
     if [ "$floored" = true ]; then
         printf "  ${CYAN}${BOX_V}${NC}  ${DIM}─────────────────────────────${NC}\n"
         printf "  ${CYAN}${BOX_V}${NC}  ${DIM}= Calculated:${NC}      %s days ${DIM}(%s h %s min)${NC}\n" "$raw_effort" "$raw_full_hours" "$raw_minutes"
@@ -1148,7 +1269,8 @@ calculate_effort() {
         "$coupling_factor" "$churn_factor" "$testing_factor" "$complexity_factor" \
         "$base_effort" "$total_hours" "$ai_coding_factor" "$ai_level" \
         "$ai_overhead_days" "$doc_level" "$doc_effort_days" "$coding_effort" \
-        "$familiarity_factor" "$functest_level" "$functest_effort_days"
+        "$familiarity_factor" "$functest_level" "$functest_effort_days" \
+        "$migration_research_days"
 
     echo ""
     printf "  ${DIM}${CHECK} Logged to ${UNDERLINE}%s${NC}\n" "$EFFORT_HISTORY_FILE"
