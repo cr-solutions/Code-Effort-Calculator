@@ -142,7 +142,7 @@ section_header() {
 # Function to print usage
 print_usage() {
     echo ""
-    printf "${BOLD}${CYAN}  Effort Calculator${NC} ${DIM}v3.1${NC}\n"
+    printf "${BOLD}${CYAN}  Effort Calculator${NC} ${DIM}v3.2${NC}\n"
     echo ""
     printf "  ${BOLD}USAGE:${NC}  $0 [OPTIONS] <file_or_directory> ...\n"
     echo ""
@@ -953,7 +953,11 @@ calculate_effort() {
         doc_hours=$(awk "BEGIN {printf \"%d\", int($doc_effort_days * 8)}")
         local doc_mins
         doc_mins=$(awk "BEGIN {printf \"%d\", ($doc_effort_days * 8 - int($doc_effort_days * 8)) * 60}")
-        printf "\n  ${YELLOW}${ARROW} Documentation: +%s days (%s h %s min) — %s${NC}\n" "$doc_effort_days" "$doc_hours" "$doc_mins" "$doc_level"
+        if [ "$PRESET_AI" != "0" ] && [ -n "$PRESET_AI" ]; then
+            printf "\n  ${YELLOW}${ARROW} Documentation: +%s days (%s h %s min) — %s ${DIM}(before AI reduction)${NC}\n" "$doc_effort_days" "$doc_hours" "$doc_mins" "$doc_level"
+        else
+            printf "\n  ${YELLOW}${ARROW} Documentation: +%s days (%s h %s min) — %s${NC}\n" "$doc_effort_days" "$doc_hours" "$doc_mins" "$doc_level"
+        fi
     else
         printf "\n  ${GREEN}${CHECK} No documentation overhead${NC}\n"
     fi
@@ -991,8 +995,13 @@ calculate_effort() {
         printf "  ${DIM}  - Reading changelogs, migration guides, release notes${NC}\n"
         printf "  ${DIM}  - Understanding new API semantics & behavioral changes${NC}\n"
         printf "  ${DIM}  - Trial-and-error when docs are incomplete${NC}\n"
-        printf "\n  ${YELLOW}${ARROW} Migration research: +%s days (%s h %s min)${NC}\n" \
-            "$migration_research_days" "$mig_hours" "$mig_mins"
+        if [ "$PRESET_AI" != "0" ] && [ -n "$PRESET_AI" ]; then
+            printf "\n  ${YELLOW}${ARROW} Migration research: +%s days (%s h %s min) ${DIM}(before AI reduction)${NC}\n" \
+                "$migration_research_days" "$mig_hours" "$mig_mins"
+        else
+            printf "\n  ${YELLOW}${ARROW} Migration research: +%s days (%s h %s min)${NC}\n" \
+                "$migration_research_days" "$mig_hours" "$mig_mins"
+        fi
     fi
 
     # AI LLM assistance question
@@ -1138,8 +1147,51 @@ calculate_effort() {
         ai_oh_hours=$(awk "BEGIN {printf \"%d\", int($ai_overhead_days * 8)}")
         local ai_oh_mins
         ai_oh_mins=$(awk "BEGIN {printf \"%d\", ($ai_overhead_days * 8 - int($ai_overhead_days * 8)) * 60}")
-        printf "\n  ${CYAN}${ARROW} AI coding reduction: ×%s (-%s%% coding effort)${NC}\n" \
-            "$ai_coding_factor" "$(awk "BEGIN {printf \"%d\", (1 - $ai_coding_factor) * 100}")"
+        printf "\n  ${CYAN}${ARROW} AI coding reduction: -%s%% (saves %s)${NC}\n" \
+            "$(awk "BEGIN {printf \"%d\", (1 - $ai_coding_factor) * 100}")" \
+            "$(days_to_hm "$(awk "BEGIN {printf \"%.6f\", $coding_effort_no_ai * (1 - $ai_coding_factor)}")")"
+        # Show AI impact on testing (preview what the adjusted factor will be)
+        if [ "$testing_factor" != "1.00" ]; then
+            local preview_testing="$testing_factor"
+            case "$ai_coding_factor" in
+                "0.85") preview_testing="1.25" ;;
+                "0.65") preview_testing="1.15" ;;
+                "0.45") preview_testing="1.10" ;;
+            esac
+            # Calculate time saved on testing: difference in factors applied to base coding effort
+            local test_saving
+            test_saving=$(awk "BEGIN {printf \"%.6f\", $coding_effort_no_ai * ($testing_factor - $preview_testing) / $testing_factor}")
+            local test_pct
+            test_pct=$(awk "BEGIN {printf \"%d\", (($testing_factor - $preview_testing) / ($testing_factor - 1)) * 100}")
+            printf "  ${CYAN}${ARROW} AI testing reduction: -%s%% (saves %s)${NC}\n" \
+                "$test_pct" "$(days_to_hm "$test_saving")"
+        fi
+        # Show AI impact on documentation
+        if [ "$(awk "BEGIN {print ($doc_effort_days > 0) ? 1 : 0}")" = "1" ]; then
+            local doc_ai_factor_preview="1.00"
+            case "$ai_coding_factor" in
+                "0.85") doc_ai_factor_preview="0.80" ;;
+                "0.65") doc_ai_factor_preview="0.50" ;;
+                "0.45") doc_ai_factor_preview="0.30" ;;
+            esac
+            local doc_saving
+            doc_saving=$(awk "BEGIN {printf \"%.6f\", $doc_effort_days * (1 - $doc_ai_factor_preview)}")
+            printf "  ${CYAN}${ARROW} AI doc reduction: -%s%% (saves %s)${NC}\n" \
+                "$(awk "BEGIN {printf \"%d\", (1 - $doc_ai_factor_preview) * 100}")" "$(days_to_hm "$doc_saving")"
+        fi
+        # Show AI impact on migration research
+        if [ "$(awk "BEGIN {print ($migration_research_days > 0) ? 1 : 0}")" = "1" ]; then
+            local mig_ai_factor_preview="1.00"
+            case "$ai_coding_factor" in
+                "0.85") mig_ai_factor_preview="0.85" ;;
+                "0.65") mig_ai_factor_preview="0.60" ;;
+                "0.45") mig_ai_factor_preview="0.40" ;;
+            esac
+            local mig_saving
+            mig_saving=$(awk "BEGIN {printf \"%.6f\", $migration_research_days * (1 - $mig_ai_factor_preview)}")
+            printf "  ${CYAN}${ARROW} AI research reduction: -%s%% (saves %s)${NC}\n" \
+                "$(awk "BEGIN {printf \"%d\", (1 - $mig_ai_factor_preview) * 100}")" "$(days_to_hm "$mig_saving")"
+        fi
         printf "  ${CYAN}${ARROW} AI overhead (RE/prompts/review): +%s days (%s h %s min)${NC}\n" \
             "$ai_overhead_days" "$ai_oh_hours" "$ai_oh_mins"
     else
@@ -1371,7 +1423,7 @@ fi
 # Banner
 echo ""
 printf "  ${BOLD}${CYAN}╔══════════════════════════════════════${NC}\n"
-printf "  ${BOLD}${CYAN}║  ${WHITE}${STAR} Effort Calculator v3.1 ${STAR}${NC}\n"
+printf "  ${BOLD}${CYAN}║  ${WHITE}${STAR} Effort Calculator v3.2 ${STAR}${NC}\n"
 printf "  ${BOLD}${CYAN}╚══════════════════════════════════════${NC}\n"
 printf "  ${DIM}$(date '+%Y-%m-%d %H:%M:%S')${NC}\n"
 

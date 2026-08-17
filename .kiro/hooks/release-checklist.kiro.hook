@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Release Checklist Reminder",
+  "description": "Before completing a task, reminds to verify: version bump in script, CHANGELOG updated, README in sync, context history file created/updated with today's date",
+  "version": "1",
+  "when": {
+    "type": "agentStop"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Before finishing, verify you completed the release checklist: 1) Version number bumped in script (both usage header and banner), 2) CHANGELOG.md updated with all changes under correct version+date, 3) README.md in sync with implementation, 4) Context history file exists for today's date under .kiro/context/. If any are missing, fix them now."
+  }
+}

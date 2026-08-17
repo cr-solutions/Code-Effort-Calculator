@@ -1,6 +1,6 @@
 # Changelog
 
-## v3.1.0 — 2026-08-14
+## v3.2.0 — 2026-08-17
 
 ### Breaking Changes
 
@@ -26,6 +26,8 @@
 - **AI reduces documentation effort**: Doc overhead now scales with AI level (Light ×0.80, Moderate ×0.50, Heavy ×0.30). AI can draft documentation from code context — you review and polish instead of writing from scratch.
 - **AI reduces unit testing overhead**: Testing factor scales from ×1.30 (no AI) down to ×1.10 (heavy AI). AI excels at generating test boilerplate, mocks, and assertions — tests are more formulaic than production code.
 - **Coding effort hint in output**: When AI is active, the calculation breakdown shows `(= steering, review & integration)` below the coding effort line to clarify what that time represents with AI assistance.
+- **Improved calculation breakdown**: Familiarity shows label (`Team code`, `Inherited`, `Unknown`), unit testing shows absolute time added (`+Xh Ym`), AI reductions show consistent `-X% (saves Yh Zm)` format.
+- **"Before AI reduction" hints**: Documentation and migration research sections show `(before AI reduction)` when AI is active, making it clear why the displayed value differs from the final breakdown.
 - **80% savings cap on AI overhead**: `overhead = min(overhead, savings × 0.80)`. Guarantees that AI always provides a net benefit regardless of task size. For tiny tasks where the floor would dominate, the cap prevents the overhead from exceeding 80% of what the AI actually saves.
 - **Consistent 0-based "none" values**: Both `doc` and `ai` preset keys now use `0` for "none", matching the existing `functest=0` convention.
 
